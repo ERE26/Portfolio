@@ -26,11 +26,16 @@ def historico(ticker, intervalo="1d", rango=None, desde=None, hasta=None, client
     """
     cli = cliente or Cliente()
     params = {"interval": intervalo, "includePrePost": "false", "events": "div,split"}
+    rango = rango or RANGO_MAX.get(intervalo, "2y")
+    # OJO: para diaria/semanal/mensual, range=max hace que Yahoo degrade en silencio
+    # a granularidad trimestral (169 velas). Se piden fechas explicitas en su lugar.
+    if desde is None and rango == "max" and intervalo in ("1d", "1wk", "1mo"):
+        desde = "1990-01-01"
     if desde is not None:
         params["period1"] = int(pd.Timestamp(desde).timestamp())
         params["period2"] = int(pd.Timestamp(hasta or dt.datetime.now()).timestamp())
     else:
-        params["range"] = rango or RANGO_MAX.get(intervalo, "2y")
+        params["range"] = rango
 
     d = cli.get_json(f"{BASE}/v8/finance/chart/{ticker}", params=params)
     res = d.get("chart", {}).get("result")
@@ -41,6 +46,10 @@ def historico(ticker, intervalo="1d", rango=None, desde=None, hasta=None, client
     ts = res.get("timestamp")
     if not ts:
         raise RuntimeError(f"Yahoo no devolvio velas para {ticker} (intervalo {intervalo})")
+    gran = res["meta"].get("dataGranularity")
+    if gran and gran != intervalo and intervalo in ("1d", "1wk", "1mo", "5m", "15m", "30m"):
+        raise RuntimeError(f"Yahoo degrado la granularidad de {ticker}: pedido {intervalo}, "
+                           f"devuelto {gran}. Usa fechas explicitas (desde=...).")
     q = res["indicators"]["quote"][0]
     # cierre ajustado por dividendos/splits si esta disponible (mejor para el largo plazo)
     ajust = res["indicators"].get("adjclose", [{}])[0].get("adjclose")

@@ -15,6 +15,55 @@ que aprenda.
 
 ---
 
+## Universo de estudio (+100 tickers reales)
+
+El catálogo (`fuentes/universo.py`) tiene **124 tickers** de tres clases:
+
+- **88 acciones** divididas en **11 sectores** (tecnología, banca, energía, salud,
+  consumo, industrial, materiales, utilities, inmobiliario, comunicación…).
+- **13 divisas** (pares forex principales y cruces).
+- **23 fondos / ETFs** (índices amplios y ETFs sectoriales).
+
+Se descargan de Yahoo en las temporalidades que permita (diaria con décadas de
+historia; intradía con el tope de Yahoo: 1h ≈ 2 años, 5m/15m ≈ 60 días):
+
+```bash
+python bot.py descargar --intervalos 1d              # histórico diario de los 124
+python bot.py descargar --intervalos 1d,1h,15m,5m    # varias temporalidades
+python bot.py descargar --clase divisa --intervalos 1h
+```
+
+## Buscar patrones en un ticker no visto (lo que hace el sistema, en un comando)
+
+Dado un ticker **excluido del entrenamiento**, el comando `buscar` detecta su
+figura actual, encuentra los patrones más parecidos (ventanas de 40 velas, nunca
+2) entre todo lo aprendido, **explica por qué cada uno se parece** (desglosando la
+similitud en forma, volumen, RSI/osciladores, momento, contexto…) y qué pasó
+después, y termina con una predicción basada en esos patrones:
+
+```bash
+python bot.py buscar --fuente mercado --intervalo 1d --ticker NVDA --en-vivo
+```
+
+Ejemplo de salida (real):
+
+```
+  TRAMO ACTUAL DE NVDA (2026-09-30, últimas 40 velas de 1d)
+  Figura detectada: canal alcista (fondo lateral)
+
+  PATRONES MÁS PARECIDOS (de 38.257 aprendidos):
+  1. PLD el 2026-05-12  (similitud 48%)
+     Figura: doble techo (giro bajista) ascendente
+     Por qué se parece: coincide en la forma del precio, los osciladores
+       (RSI, MACD, Bollinger), el contexto de mercado; difiere en la volatilidad
+     Lo que pasó después: +1.90% en 10 velas
+  ...
+  PREDICCIÓN: prob. subida 63%, confianza 0.15 -> BAJA, no hay patrones
+  suficientemente parecidos, tomar con cautela
+```
+
+---
+
 ## Qué tiene en cuenta
 
 Para cada tramo de gráfico, el sistema construye un "caso" con:
@@ -106,6 +155,40 @@ desconfía de cualquier trabajo que te prometa mucho más.
 | ![Curva de aprendizaje](figuras/01_curva_aprendizaje.png) | ![Calibración](figuras/02_calibracion.png) |
 | ![Evolución de pesos](figuras/03_pesos.png) | ![Cono de predicción](figuras/04_cono_prediccion.png) |
 
+## Resultados en datos REALES (124 tickers, diario, 10 años) — y por qué importan
+
+Aquí está el hallazgo más honesto del proyecto. En el mercado **sintético** (donde
+*plantamos* los patrones) el sistema los encuentra: bate baselines, AUC 0.57. En
+el mercado **real**, el edge direccional puro a 10 días **casi desaparece**:
+
+| Métrica (walk-forward, 2.775 predicciones) | Valor |
+|---|---|
+| Acierto direccional | 54.7% |
+| Tasa base de subidas (baseline "siempre sube") | **55.7%** |
+| ¿Bate el baseline? | **No** |
+| AUC | 0.52 |
+| Acierto en fondos/ETFs | 58.6% (su baseline: 58.8%) |
+| Acierto en acciones | 53.7% |
+
+![Real por clase](figuras/05_real_por_clase.png)
+![Pesos sintético vs real](figuras/06_pesos_sint_vs_real.png)
+
+**Esto no es un fallo del código** (33 tests lo verifican y el sintético lo
+confirma): es *la realidad de predecir dirección en mercados reales*. El periodo
+2016–2026 fue mayormente alcista, y batir "siempre sube" con forma + indicadores
+es genuinamente difícil. Dos observaciones con valor de trabajo:
+
+- **Lo que el sistema aprende a mirar cambia según el mundo**: en el sintético, la
+  *forma* domina (peso 0.47); en el real, la **volatilidad** se dispara a 0.72 — el
+  régimen de riesgo informa más que el dibujo del gráfico.
+- **Los fondos/ETFs se predicen algo mejor que las acciones** (más técnicos, menos
+  idiosincráticos), aunque tampoco baten claramente su propio baseline.
+
+La conclusión honesta: el método (buscar patrones parecidos, explicarlos, aprender
+pesos, evaluar sin trampas) funciona y es interpretable; el *edge* direccional
+simple en mercados reales es mínimo. Desconfía de cualquier trabajo que prometa
+más.
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -194,6 +277,8 @@ patrones/
   noticias.py            sentimiento de titulares con decaimiento temporal
   ventanas.py            construcción de casos (forma + indicadores + contexto + resultado)
   memoria.py             memoria de casos: predice por vecinos y aprende de sus errores
+  figuras.py             detector de figuras chartistas (techos/suelos, HCH, canales, roturas)
+  explicar.py            desglose de por qué dos tramos se parecen
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
@@ -204,7 +289,9 @@ fuentes/
   tradingview.py         scanner en vivo (indicadores + recomendación técnica)
   forexfactory.py        calendario macro (feed JSON)
   noticias_reales.py     fuente de noticias reales compatible con el pipeline
-tests/                   26 tests; el grueso vigila que no se cuele información del futuro
+  universo.py            catálogo de +100 tickers (acciones por sector, divisas, fondos)
+  descarga.py            descarga por lotes multi-temporalidad con caché
+tests/                   33 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

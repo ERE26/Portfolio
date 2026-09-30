@@ -369,11 +369,14 @@ class MemoriaPatrones:
                 wg = wg / max(wg.sum(), EPS)
                 probs_grupo[g] = float(np.clip((wg * (self.ret[cand[sg]] > 0)).sum(), 0.001, 0.999))
 
-        vecinos = pd.DataFrame({
-            "ticker": self.tickers[gidx], "fecha": self.fechas[gidx],
-            "distancia": d, "peso": w, "ret": r,
-            "mfe": self.mfe[gidx], "mae": self.mae[gidx],
-            "patron": self.patron[gidx]}).sort_values("distancia").reset_index(drop=True)
+        cols_vec = {"ticker": self.tickers[gidx], "fecha": self.fechas[gidx],
+                    "distancia": d, "peso": w, "ret": r,
+                    "mfe": self.mfe[gidx], "mae": self.mae[gidx],
+                    "patron": self.patron[gidx]}
+        # distancia por grupo de cada vecino: es el "por que se parece"
+        for g in dg:
+            cols_vec[f"d_{g}"] = dg[g][sel]
+        vecinos = pd.DataFrame(cols_vec).sort_values("distancia").reset_index(drop=True)
 
         return Prediccion(
             ticker=ticker, fecha=pd.Timestamp(fecha), prob_sube_cruda=prob_cruda,

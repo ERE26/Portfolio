@@ -65,6 +65,10 @@ def forma(matriz):
 def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None):
     """Todos los indicadores de una vez, alineados por fecha. Nunca miran al futuro."""
     o, h, l, c, v = (df[k] for k in ("open", "high", "low", "close", "volume"))
+    # activos sin volumen (forex, algunos indices): Yahoo devuelve volumen 0.
+    # Sus indicadores de volumen no se pueden calcular, asi que se neutralizan a 0
+    # en lugar de dejar NaN (que descartaria TODOS los casos del activo).
+    sin_volumen = (v.fillna(0) <= 0).mean() > 0.5 or v.nunique() <= 1
     a = ind.atr(h, l, c, 14)
     _, hist = ind.macd(c)[1:]
     adx14, di_mas, di_menos = ind.adx(h, l, c, 14)
@@ -85,9 +89,14 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None):
     out["pos_sma200"] = c / sma200 - 1.0
     out["pend_sma50"] = ind.pendiente(sma50, 20)
     out["dist_max252"], out["dist_min252"] = dmax, dmin
-    out["z_volumen20"] = ind.z_score(v, 20)
-    out["tendencia_volumen"] = np.log(ind.sma(v, 5) / ind.sma(v, 60))
-    out["pend_obv"] = ind.pendiente(ind.obv(c, v), 20)
+    if sin_volumen:
+        out["z_volumen20"] = 0.0
+        out["tendencia_volumen"] = 0.0
+        out["pend_obv"] = 0.0
+    else:
+        out["z_volumen20"] = ind.z_score(v, 20)
+        out["tendencia_volumen"] = np.log(ind.sma(v, 5) / ind.sma(v, 60))
+        out["pend_obv"] = ind.pendiente(ind.obv(c, v), 20)
     out["atr_pct"] = a / c
     out["vol_real20"] = vol20
     out["ratio_vol_20_60"] = vol20 / ind.volatilidad_realizada(c, 60).replace(0.0, np.nan)

@@ -3,7 +3,7 @@ import os
 from types import SimpleNamespace
 
 # opciones globales que las ramas de descarga leen sin ensuciar cada firma
-_OPCS = SimpleNamespace(intervalo="1d", rango="5y", sectores=None)
+_OPCS = SimpleNamespace(intervalo="1d", rango="5y", sectores=None, mercado="datos/mercado")
 
 from . import contexto as mod_ctx
 from . import datos as mod_datos
@@ -43,6 +43,17 @@ def cargar_universo(fuente="sintetico", carpeta="datos/sintetico", tickers=None,
             pre = {t: pre[t] for t in tickers if t in pre}
         return pre, meta, idx, None
 
+    if fuente == "mercado":
+        from fuentes.descarga import cargar_mercado
+        intervalo = getattr(_OPCS, "intervalo", "1d")
+        pre, meta = cargar_mercado(getattr(_OPCS, "mercado", "datos/mercado"), intervalo)
+        if tickers:
+            pre = {t: pre[t] for t in tickers if t in pre}
+            meta = meta[meta.ticker.isin(pre.keys())].reset_index(drop=True)
+        if verbose:
+            print(f"Universo descargado: {len(pre)} valores en {intervalo}")
+        return pre, meta, None, None
+
     if fuente == "yahoo":
         from fuentes import yahoo as fy
         if not tickers:
@@ -61,6 +72,7 @@ def montar_banco(args, verbose=True):
     _OPCS.intervalo = getattr(args, "intervalo", "1d")
     _OPCS.rango = getattr(args, "rango", "5y")
     _OPCS.sectores = getattr(args, "sectores", None)
+    _OPCS.mercado = getattr(args, "mercado", "datos/mercado")
     pre, meta, idx, reg = cargar_universo(
         args.fuente, args.carpeta, args.tickers, args.n_tickers, args.n_barras,
         args.semilla, args.desde, verbose)

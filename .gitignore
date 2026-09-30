@@ -6,5 +6,6 @@ aprendizaje*.csv
 .ipynb_checkpoints/
 datos/sintetico/
 datos/cache/
+datos/mercado/
 !datos/.gitkeep
 .DS_Store

@@ -110,7 +110,11 @@ def baselines(df, banco_test=None):
     rng = np.random.default_rng(0)
     p = rng.random(len(df))
     out["aleatorio"] = metricas(df.assign(prob=p).drop(columns=["ret_esperado"], errors="ignore"))
-    if banco_test is not None and "ret_20" in banco_test.nombres_feat:
+    # baseline de momento: solo si el banco esta alineado 1:1 con los resultados
+    # (mismo n). Con submuestreo no solapado, res es un subconjunto y no alinea,
+    # asi que se omite en ese caso en vez de mezclar longitudes distintas.
+    if banco_test is not None and "ret_20" in banco_test.nombres_feat \
+            and len(banco_test) == len(df):
         mom = banco_test.feat[:, banco_test.nombres_feat.index("ret_20")]
         pm = 1 / (1 + np.exp(-mom * 8))
         out["momento_20d"] = metricas(pd.DataFrame({"prob": pm, "ret_real": df["ret_real"].to_numpy()}))

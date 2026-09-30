@@ -35,8 +35,9 @@ from patrones.pipeline import montar_banco
 
 
 def _comunes(p):
-    p.add_argument("--fuente", default="sintetico", choices=["sintetico", "csv", "yahoo"],
-                   help="de donde salen los precios")
+    p.add_argument("--fuente", default="sintetico",
+                   choices=["sintetico", "csv", "yahoo", "mercado"],
+                   help="de donde salen los precios ('mercado' = universo descargado)")
     p.add_argument("--carpeta", default="datos/sintetico", help="carpeta de CSVs (csv/sintetico)")
     p.add_argument("--tickers", type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
                    help="lista separada por comas (yahoo, o filtrar csv)")
@@ -197,6 +198,138 @@ def _barra(c, lo, hi, ancho=40):
     return "".join(linea)
 
 
+def cmd_buscar(args):
+    """Analiza un ticker NO visto: figura actual, patrones parecidos (>=5 velas),
+    por que se parecen, y prediccion basada en ellos."""
+    import numpy as np
+    from patrones import contexto as mod_ctx, ventanas as mod_v
+    from patrones.figuras import describir, texto
+    from patrones.explicar import por_que_parecido
+    from patrones.memoria import MemoriaPatrones
+
+    objetivo = args.ticker
+    if args.fuente == "mercado":
+        from fuentes.descarga import cargar_mercado
+        pre, meta = cargar_mercado(args.mercado, intervalo=args.intervalo)
+    else:
+        _b, pre, _c, _r = montar_banco(args, verbose=True)
+        meta = None
+
+    # si el objetivo no esta en el universo, se descarga de Yahoo al vuelo
+    if objetivo not in pre:
+        try:
+            from fuentes import yahoo
+            rng = "max" if args.intervalo in ("1d", "1wk", "1mo") else "730d"
+            df, _ = yahoo.historico(objetivo, intervalo=args.intervalo, rango=rng)
+            pre[objetivo] = df
+        except Exception as e:
+            raise SystemExit(f"No se pudo obtener {objetivo}: {e}")
+
+    if meta is None:
+        meta = pd.DataFrame({"ticker": list(pre),
+                             "sector": [(args.sectores or {}).get(t, "desconocido") for t in pre],
+                             "nombre": list(pre)})
+    if objetivo not in set(meta["ticker"]):
+        meta = pd.concat([meta, pd.DataFrame([{"ticker": objetivo, "clase": "accion",
+                          "sector": (args.sectores or {}).get(objetivo, "desconocido"),
+                          "nombre": objetivo}])], ignore_index=True)
+
+    # el ticker objetivo se EXCLUYE de la memoria (no se ha visto en entrenamiento)
+    entren = {t: d for t, d in pre.items() if t != objetivo}
+    if not entren:
+        raise SystemExit("Hace falta mas de un ticker para entrenar excluyendo el objetivo.")
+
+    cfg = mod_v.Config(largo=args.largo, horizonte=args.horizonte, paso=args.paso)
+    # recorta el historico para que un universo grande sea manejable
+    if args.anos and args.anos > 0:
+        corte = pd.Timestamp.now() - pd.Timedelta(days=int(args.anos * 365))
+        minimo = cfg.minimo_historia + cfg.largo + cfg.horizonte + 5
+        entren = {t: d[d.index >= corte] for t, d in entren.items()}
+        entren = {t: d for t, d in entren.items() if len(d) >= minimo}
+    print(f"\nEntrenando con {len(entren)} valores (excluyendo {objetivo}), "
+          f"{args.anos:.0f} anos, 1 caso cada {args.paso} velas...")
+    ctx = mod_ctx.Contexto({**entren, objetivo: pre[objetivo]}, meta)
+    banco = mod_v.construir(entren, ctx, None, cfg, verbose=False)
+    if len(banco) < 200:
+        raise SystemExit(f"Muy pocos casos ({len(banco)}). Usa mas historico o mas tickers.")
+    # con memoria grande, la calibracion de escala usa menos muestras (es solo una
+    # referencia para la confianza, no cambia los vecinos)
+    import patrones.memoria as _mm
+    if not getattr(_mm, "_cal_parcheado", False):
+        _orig = _mm.MemoriaPatrones._calibrar_escala
+        _mm.MemoriaPatrones._calibrar_escala = \
+            lambda self, n_muestra=60, semilla=0: _orig(self, min(n_muestra, 60), semilla)
+        _mm._cal_parcheado = True
+    mem = MemoriaPatrones(cfg, k=max(args.n_similares * 4, 30),
+                          umbral_confianza=args.umbral_confianza).ajustar(banco)
+    print(f"Memoria: {len(mem)} patrones aprendidos de {banco.meta.ticker.nunique()} valores.")
+
+    # tramo objetivo = borde real del grafico del ticker no visto
+    vivo = mod_v.caso_vivo(pre, ctx, None, cfg, objetivo)
+    desc_obj = describir(vivo.formas[0], vivo.formas_vol[0])
+    print("\n" + "=" * 72)
+    print(f"  TRAMO ACTUAL DE {objetivo}  ({vivo.meta.fecha.iloc[0].date()}, "
+          f"ultimas {args.largo} velas de {args.intervalo})")
+    print("=" * 72)
+    print(f"  Figura detectada: {texto(desc_obj)}")
+    print(f"  Picos {desc_obj['n_picos']}, valles {desc_obj['n_valles']}, "
+          f"pendiente {desc_obj['pendiente']:+.3f}")
+
+    pred = mem.predecir(vivo, 0)
+    vec = pred.vecinos.head(args.n_similares)
+    print(f"\n  PATRONES MAS PARECIDOS (>= {args.min_velas} velas, de {len(mem)} aprendidos):")
+    for i, (_, v) in enumerate(vec.iterrows(), 1):
+        # reconstruir la forma del vecino para describir su figura
+        gpos = np.flatnonzero((mem.tickers == v["ticker"]) &
+                              (mem.fechas == np.datetime64(pd.Timestamp(v["fecha"]))))
+        fig_v = ""
+        if len(gpos):
+            dv = describir(mem.banco.formas[gpos[0]], mem.banco.formas_vol[gpos[0]])
+            fig_v = texto(dv)
+        print(f"\n  {i}. {v['ticker']} el {pd.Timestamp(v['fecha']).date()}  "
+              f"(similitud {1 - v['distancia']:.0%})")
+        if fig_v:
+            print(f"     Figura: {fig_v}")
+        print(f"     Por que se parece: {por_que_parecido(v, mem.pesos)}")
+        print(f"     Lo que paso despues: {v['ret'] * 100:+.2f}% en {args.horizonte} velas "
+              f"(recorrido +{v['mfe']:.1f}/-{abs(v['mae']):.1f} ATR)")
+
+    print("\n" + "-" * 72)
+    print("  PREDICCION (basada en lo que hicieron esos patrones parecidos)")
+    print("-" * 72)
+    signo = "AL ALZA" if pred.prob_sube > .5 else "A LA BAJA"
+    print(f"  Sesgo {signo}: prob. de subida {pred.prob_sube:.0%}  "
+          f"(retorno esperado {pred.ret_esperado * 100:+.2f}% a {args.horizonte} velas)")
+    print(f"  Confianza {pred.confianza:.2f}" +
+          ("  -> BAJA: no hay patrones suficientemente parecidos, tomar con cautela"
+           if pred.abstencion else "  -> los patrones parecidos son consistentes"))
+    coinc = vec["ret"].gt(0).mean() if len(vec) else float("nan")
+    print(f"  De los {len(vec)} patrones mas parecidos, subieron el {coinc:.0%}")
+
+    if args.en_vivo:
+        _capa_en_vivo(objetivo, pre, banco if 'banco' in dir() else None)
+    print("\n  (Herramienta de estudio; no es recomendacion de inversion.)")
+
+
+def cmd_descargar(args):
+    """Descarga el universo del catalogo a CSV (uno por ticker y temporalidad)."""
+    from fuentes.descarga import descargar_universo
+    from fuentes.universo import por_clase, resumen
+    r = resumen()
+    print(f"Universo: {r['total']} tickers -> {r['por_clase']}")
+    tickers = por_clase(args.clase) if args.clase else None
+    for iv in args.intervalos:
+        lim = {"5m": "~60 dias", "15m": "~60 dias", "30m": "~60 dias",
+               "1h": "~2 anos", "1d": "decadas", "1wk": "decadas"}.get(iv, "?")
+        print(f"\nDescargando {iv} (historico disponible en Yahoo: {lim})...")
+    inf = descargar_universo(tickers=tickers, intervalos=args.intervalos,
+                             carpeta=args.carpeta, pausa=args.pausa)
+    ok = inf[inf.estado.isin(["ok", "cache"])]
+    print(f"\nDescargado: {len(ok)} (ticker,intervalo) con datos | "
+          f"{int(ok.velas.sum()):,} velas | errores: {(~inf.estado.isin(['ok','cache'])).sum()}")
+    print(f"Guardado en {args.carpeta}/. Ya puedes usar --fuente mercado.")
+
+
 def cmd_envivo(args):
     """Panel en vivo sin tocar el modelo: scanner, titulares y calendario macro."""
     from fuentes import tradingview as tv, forexfactory as ff
@@ -270,6 +403,31 @@ def main(argv=None):
     pp.add_argument("--en-vivo", action="store_true",
                     help="anade la segunda opinion de TradingView y titulares recientes")
     pp.set_defaults(func=cmd_predecir)
+
+    pb = sub.add_parser("buscar",
+                        help="busca en lo aprendido los patrones mas parecidos a un ticker no visto")
+    _comunes(pb)
+    pb.add_argument("--ticker", required=True, help="valor a analizar (se EXCLUYE del entrenamiento)")
+    pb.add_argument("--n-similares", type=int, default=6, help="cuantos patrones parecidos mostrar")
+    pb.add_argument("--min-velas", type=int, default=5, help="minimo de velas del patron (>=5)")
+    pb.add_argument("--paso", type=int, default=5,
+                    help="submuestreo: 1 caso cada N velas por valor (universos grandes)")
+    pb.add_argument("--anos", type=float, default=8.0,
+                    help="limita el historico a los ultimos N anos por valor")
+    pb.add_argument("--en-vivo", action="store_true", help="anade TradingView y titulares actuales")
+    pb.add_argument("--mercado", default="datos/mercado",
+                    help="carpeta de CSV descargados (si se usa --fuente mercado)")
+    pb.set_defaults(func=cmd_buscar)
+
+    pdl = sub.add_parser("descargar",
+                         help="descarga el universo (+100 tickers) a datos/mercado")
+    pdl.add_argument("--intervalos", type=lambda s: s.split(","), default=["1d"],
+                     help="temporalidades separadas por comas: 1d,1h,15m,5m...")
+    pdl.add_argument("--carpeta", default="datos/mercado")
+    pdl.add_argument("--clase", choices=["accion", "divisa", "fondo"], default=None,
+                     help="descargar solo una clase de activo")
+    pdl.add_argument("--pausa", type=float, default=0.3)
+    pdl.set_defaults(func=cmd_descargar)
 
     pv = sub.add_parser("envivo", help="estado en vivo (TradingView + noticias + calendario)")
     pv.add_argument("--tickers", type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
