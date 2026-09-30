@@ -189,6 +189,56 @@ pesos, evaluar sin trampas) funciona y es interpretable; el *edge* direccional
 simple en mercados reales es mínimo. Desconfía de cualquier trabajo que prometa
 más.
 
+## Metodología avanzada: "no solo acertar, sino cuál elegir para acertar"
+
+El acierto direccional bruto está cerca de su límite (~52% en real). El salto de
+rendimiento no viene de mejores precios, sino de **cómo se plantea el problema**:
+
+- **Triple-barrier labeling** (`patrones/etiquetado.py`, método de López de
+  Prado): cada caso se etiqueta como una operación real con **objetivo, stop y
+  tiempo** (en múltiplos de ATR), según qué barrera toca primero. Incorpora el
+  camino y el riesgo/recompensa, no solo el signo del retorno.
+- **Meta-labeling** (`patrones/meta.py`): un segundo modelo aprende a predecir *si
+  cada señal va a acertar*, mirando el acuerdo entre vecinos, el régimen de
+  volatilidad y la asimetría del recorrido esperado. Se opera solo lo fiable.
+
+En el **mercado sintético** (con patrones plantados) el efecto es grande: operar
+solo lo que el meta selecciona sube la precisión del 54% (todo) al **69%** (Sharpe
+1.46). En **datos reales** el rescate es modesto pero real cuando se añaden
+fundamentales.
+
+## Datos que el precio no contiene: SEC EDGAR + FRED
+
+- **SEC EDGAR** (`fuentes/sec.py`, gratis): fundamentales trimestrales con fecha de
+  publicación real (point-in-time): crecimiento de ingresos y BPA interanual,
+  aceleración y "sorpresa de tendencia". Fusiona conceptos contables para cubrir
+  todo el histórico (p. ej. NVDA: 67 trimestres, con el boom de IA visible).
+- **FRED** (`fuentes/fred.py`, clave gratis en `FRED_API_KEY`): régimen macro —
+  VIX, pendiente de la curva de tipos (10-2), spread de crédito Baa. Todas
+  point-in-time; en el crash de COVID el VIX y el spread se disparan.
+
+Se enchufan con `--con-fundamentales` y `--con-macro`:
+
+```bash
+export FRED_API_KEY=tu_clave
+python bot.py evaluar --fuente mercado --con-fundamentales --con-macro
+```
+
+### Experimento comparativo (datos reales, meta-labeling, 2.664 señales)
+
+![Meta y datos alternativos](figuras/07_meta_experimento.png)
+
+| Configuración | Acierto bruto | Precisión con selección | Cobertura |
+|---|---|---|---|
+| Solo técnico | 51.7% | 51.3% | 4% |
+| **+ fundamentales (SEC)** | 51.7% | **53.2%** (IC95 51.1–55.4) | 78% |
+| + macro (FRED) | 52.1% | 52.8% | 2% |
+
+La lectura: los **fundamentales mejoran la selección** de forma medible (el IC ya
+excluye el 50%); el macro ayuda al Sharpe pero con cobertura pequeña. El acierto
+bruto no se mueve — como debe ser en un mercado real. El valor está en *elegir
+mejor*, no en adivinar más.
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -279,6 +329,8 @@ patrones/
   memoria.py             memoria de casos: predice por vecinos y aprende de sus errores
   figuras.py             detector de figuras chartistas (techos/suelos, HCH, canales, roturas)
   explicar.py            desglose de por qué dos tramos se parecen
+  etiquetado.py          triple-barrier labeling (objetivo/stop/tiempo) + unicidad
+  meta.py                meta-labeling: elegir qué señales operar
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
@@ -291,7 +343,10 @@ fuentes/
   noticias_reales.py     fuente de noticias reales compatible con el pipeline
   universo.py            catálogo de +100 tickers (acciones por sector, divisas, fondos)
   descarga.py            descarga por lotes multi-temporalidad con caché
-tests/                   33 tests; el grueso vigila que no se cuele información del futuro
+  sec.py                 SEC EDGAR: fundamentales point-in-time (gratis)
+  fred.py                FRED: macro de régimen (VIX, curva, crédito)
+  enriquecer.py          combina SEC + FRED como features del pipeline
+tests/                   40 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

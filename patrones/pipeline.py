@@ -98,8 +98,18 @@ def montar_banco(args, verbose=True):
                 f" CON SENAL INYECTADA DE {args.senal_noticias:.2f} (experimento de ablacion)"
             print(f"Noticias: {len(fn.df)} titulares sinteticos{aviso}")
 
-    cfg = mod_ventanas.Config(largo=args.largo, horizonte=args.horizonte)
-    banco = mod_ventanas.construir(pre, ctx, fn, cfg, verbose=verbose)
+    cfg = mod_ventanas.Config(largo=args.largo, horizonte=args.horizonte,
+                              paso=getattr(args, "paso", 1))
+    enr = None
+    if getattr(args, "con_fundamentales", False) or getattr(args, "con_macro", False):
+        from fuentes.enriquecer import Enriquecedor
+        enr = Enriquecedor(con_sec=getattr(args, "con_fundamentales", False),
+                           con_fred=getattr(args, "con_macro", False),
+                           clave_fred=getattr(args, "clave_fred", None), verbose=verbose)
+        if verbose:
+            print(f"Enriqueciendo con SEC={getattr(args,'con_fundamentales',False)} "
+                  f"FRED={getattr(args,'con_macro',False)}...")
+    banco = mod_ventanas.construir(pre, ctx, fn, cfg, verbose=verbose, enriquecer=enr)
     banco = mod_ventanas.etiquetar(banco, reg)
     if verbose:
         print(banco.resumen())

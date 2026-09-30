@@ -57,6 +57,11 @@ def _comunes(p):
     p.add_argument("--noticias-csv", default="datos/noticias.csv")
     p.add_argument("--senal-noticias", type=float, default=0.0,
                    help="0 = noticias sin ventaja; >0 inyecta ventaja para el experimento de ablacion")
+    p.add_argument("--con-fundamentales", action="store_true",
+                   help="anade fundamentales de SEC EDGAR (acciones)")
+    p.add_argument("--con-macro", action="store_true",
+                   help="anade macro de FRED (requiere FRED_API_KEY)")
+    p.add_argument("--clave-fred", default=None, help="clave FRED (o variable FRED_API_KEY)")
     p.add_argument("-k", type=int, default=30, help="numero de vecinos")
     p.add_argument("--umbral-confianza", type=float, default=0.35)
 

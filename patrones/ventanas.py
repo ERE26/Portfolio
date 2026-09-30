@@ -24,6 +24,7 @@ from numpy.lib.stride_tricks import sliding_window_view as ventanas_de
 from . import indicadores as ind
 from . import noticias as mod_noticias
 from .datos import resample
+from .etiquetado import triple_barrera as etiqueta_triple_barrera
 
 EPS = 1e-9
 
@@ -38,6 +39,8 @@ class Config:
     dias_noticias: int = 30
     semivida_noticias: float = 7.0
     minimo_historia: int = 260   # barras necesarias antes del primer caso (SMA200, etc.)
+    k_pt: float = 1.5            # barrera de beneficio, en multiplos de ATR
+    k_sl: float = 1.5            # barrera de perdida, en multiplos de ATR
     temporalidades: dict = field(default_factory=lambda: {"semanal": "W-FRI", "mensual": "ME"})
 
 
@@ -50,6 +53,10 @@ GRUPOS_ESCALARES = {
     "contexto": ["mkt_sobre_sma200", "mkt_ret_20", "mkt_vol_percentil", "mkt_dd",
                  "fuerza_rel_indice_20", "fuerza_rel_indice_60", "fuerza_rel_sector_20"],
     "noticias": ["noticias_sentimiento", "noticias_n", "noticias_dispersion"],
+    "fundamentales": ["fund_dias_desde_pub", "fund_crec_ingresos_yoy", "fund_crec_bpa_yoy",
+                      "fund_aceleracion_ingresos", "fund_sorpresa_tendencia"],
+    "macro": ["macro_vix", "macro_vix_cambio", "macro_pendiente_curva",
+              "macro_spread_credito", "macro_tendencia_tipos"],
 }
 NOMBRES_ESCALARES = [c for cols in GRUPOS_ESCALARES.values() for c in cols]
 
@@ -62,8 +69,12 @@ def forma(matriz):
     return ((m - mu) / np.maximum(sd, EPS)).astype(np.float32)
 
 
-def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None):
-    """Todos los indicadores de una vez, alineados por fecha. Nunca miran al futuro."""
+def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extra=None):
+    """Todos los indicadores de una vez, alineados por fecha. Nunca miran al futuro.
+
+    rasgos_extra: dict de DataFrames adicionales (fundamentales SEC, macro FRED...)
+    ya indexados por fecha; se reindexan al calendario del activo y rellenan con 0.
+    """
     o, h, l, c, v = (df[k] for k in ("open", "high", "low", "close", "volume"))
     # activos sin volumen (forex, algunos indices): Yahoo devuelve volumen 0.
     # Sus indicadores de volumen no se pueden calcular, asi que se neutralizan a 0
@@ -103,15 +114,18 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None):
     out["rango_atr"] = (h - l) / a.replace(0.0, np.nan)
     out["gap_medio20"] = np.log(o / c.shift(1)).abs().rolling(20, min_periods=20).mean()
 
-    for origen, cols in (("contexto", GRUPOS_ESCALARES["contexto"]),
-                         ("noticias", GRUPOS_ESCALARES["noticias"])):
-        fuente = rasgos_contexto if origen == "contexto" else rasgos_noticias
-        for col in cols:
+    rasgos_extra = rasgos_extra or {}
+    fuentes = {"contexto": rasgos_contexto, "noticias": rasgos_noticias,
+               "fundamentales": rasgos_extra.get("fundamentales"),
+               "macro": rasgos_extra.get("macro")}
+    for origen in ("contexto", "noticias", "fundamentales", "macro"):
+        fuente = fuentes[origen]
+        for col in GRUPOS_ESCALARES[origen]:
             if fuente is not None and col in fuente.columns:
                 out[col] = fuente[col].reindex(df.index).astype(float)
             else:
                 out[col] = 0.0
-    return out[NOMBRES_ESCALARES]
+    return out[NOMBRES_ESCALARES].fillna(0.0)
 
 
 class BancoCasos:
@@ -176,7 +190,8 @@ def _formas_tf(df, regla, largo, fechas_caso):
     return out, ok
 
 
-def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, verbose=True):
+def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, verbose=True,
+              enriquecer=None):
     """Convierte un universo de precios en un BancoCasos."""
     cfg = cfg or Config()
     L, H = cfg.largo, cfg.horizonte
@@ -200,7 +215,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         rn = mod_noticias.rasgos_sentimiento(fuente_noticias, t, df.index,
                                              cfg.dias_noticias, cfg.semivida_noticias) \
             if not isinstance(fuente_noticias, mod_noticias.SinNoticias) else None
-        F = rasgos_escalares(df, rc, rn)
+        extra = enriquecer(t, df.index) if enriquecer is not None else None
+        F = rasgos_escalares(df, rc, rn, rasgos_extra=extra)
 
         lc = np.log(df["close"].to_numpy(float))
         lv = np.log(np.maximum(df["volume"].to_numpy(float), 1.0))
@@ -230,6 +246,9 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         ret = lc[pos + H] - base
         mfe = (Wfh[pos + 1].max(axis=1) - base) / atr_pct
         mae = (Wfl[pos + 1].min(axis=1) - base) / atr_pct
+        # etiqueta triple-barrera: operacion realista con objetivo y stop en ATR
+        tb = etiqueta_triple_barrera(lh, ll, lc, pos, atr_pct, H,
+                                     cfg.k_pt, cfg.k_sl)
 
         fechas = df.index[pos]
         tfs, ok_tf = {}, np.ones(len(pos), bool)
@@ -258,6 +277,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
             "atr_pct": atr_pct[valido]}))
         acum["y"].append(pd.DataFrame({
             "ret": ret[valido], "direccion": np.sign(ret[valido]),
+            "tb_label": tb["label"][valido], "tb_ret": tb["ret"][valido],
+            "tb_barras": tb["barras"][valido], "tb_rr": tb["rr"][valido],
             "mfe": mfe[valido], "mae": mae[valido]}))
         if verbose:
             print(f"  {t}: {int(valido.sum())} casos")
@@ -306,7 +327,7 @@ def etiquetar(banco, registro, tolerancia_dias=3):
     return banco
 
 
-def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None):
+def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None, enriquecer=None):
     """Construye UN caso en la ultima barra disponible, sin exigir futuro.
 
     Es lo que se necesita para predecir de verdad el borde del grafico (el
@@ -327,7 +348,8 @@ def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None):
     rn = mod_noticias.rasgos_sentimiento(fuente_noticias, ticker, df.index,
                                          cfg.dias_noticias, cfg.semivida_noticias) \
         if not isinstance(fuente_noticias, mod_noticias.SinNoticias) else None
-    F = rasgos_escalares(df, rc, rn)
+    extra = enriquecer(ticker, df.index) if enriquecer is not None else None
+    F = rasgos_escalares(df, rc, rn, rasgos_extra=extra)
 
     lc = np.log(df["close"].to_numpy(float))
     lv = np.log(np.maximum(df["volume"].to_numpy(float), 1.0))
@@ -347,7 +369,9 @@ def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None):
     meta = pd.DataFrame({"ticker": ticker, "fecha": fechas,
                          "sector": ctx.sector_de(ticker) if ctx is not None else "desconocido",
                          "close": df["close"].to_numpy(float)[pos], "atr_pct": atr_pct})
-    y = pd.DataFrame({"ret": [np.nan], "direccion": [np.nan], "mfe": [np.nan], "mae": [np.nan]})
+    y = pd.DataFrame({"ret": [np.nan], "direccion": [np.nan], "mfe": [np.nan], "mae": [np.nan],
+                      "tb_label": [np.nan], "tb_ret": [np.nan], "tb_barras": [np.nan],
+                      "tb_rr": [np.nan]})
     caminos = np.full((1, cfg.horizonte), np.nan, np.float32)
     banco = BancoCasos(cfg, formas, formas_vol, tfs, Mf.astype(np.float32), meta, y, caminos)
     banco.meta["patron"] = ""

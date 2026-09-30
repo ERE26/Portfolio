@@ -9,3 +9,4 @@ datos/cache/
 datos/mercado/
 !datos/.gitkeep
 .DS_Store
+datos/.fred_key

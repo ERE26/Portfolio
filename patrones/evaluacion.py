@@ -281,3 +281,149 @@ def informe(resultados, banco_test=None, coste_bps=10.0, horizonte=10, titulo="R
     print("\n".join(lineas))
     return {"metricas": m, "baselines": base, "backtest": bt, "calibracion": cal,
            "equity": equity, "bate_baseline": veredicto == "SI"}
+
+
+# ============================================================================
+# EVALUACION CON META-LABELING: "cual elegir para acertar"
+# ============================================================================
+def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
+    """Genera predicciones primarias + features del meta para un subconjunto."""
+    from .meta import features_meta, etiqueta_acierto
+    filas_f, aciertos, info = [], [], []
+    for i in range(len(banco_sub)):
+        p = mem.predecir(banco_sub, i)
+        if p.abstencion and len(p.vecinos) == 0:
+            continue
+        filas_f.append(features_meta(p, banco_sub, i))
+        yf = banco_sub.y.iloc[i].to_dict()
+        aciertos.append(etiqueta_acierto(p, yf))
+        lado = 1 if p.prob_sube > 0.5 else -1
+        info.append({"fecha": p.fecha, "ticker": p.ticker, "lado": lado,
+                     "prob": p.prob_sube, "confianza": p.confianza,
+                     "tb_ret": yf.get("tb_ret", np.nan), "tb_label": yf.get("tb_label", np.nan),
+                     "ret": yf.get("ret", np.nan), "atr_pct": yf.get("atr_pct", np.nan)})
+    return filas_f, np.array(aciertos), pd.DataFrame(info)
+
+
+def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
+                 umbral_meta=None, coste_bps=10.0, verbose=True, **kw_mem):
+    """Walk-forward de dos etapas: memoria (primario) + meta-modelo (seleccion).
+
+    Por cada pliegue de test:
+      1. memoria entrenada con el pasado anterior a la validacion
+      2. se generan predicciones OUT-OF-SAMPLE en un bloque de validacion y se
+         entrena el meta-modelo (¿acierta la senal?)
+      3. la memoria se re-entrena con TODO el pasado y se predice el test;
+         el meta decide que operaciones tomar
+    Mide acierto bruto vs acierto/retorno en las operaciones SELECCIONADas.
+    """
+    from .memoria import MemoriaPatrones
+    from .meta import MetaModelo
+    from .etiquetado import pesos_unicidad
+
+    cfg = banco.cfg
+    paso_test = paso_test or cfg.horizonte
+    pliegues = pliegues_temporales(banco.meta["fecha"], n_pliegues)
+    todo = []
+    imp_meta = {}
+    for j, (ini, fin) in enumerate(pliegues, 1):
+        dur = (ini - pliegues[0][0]) if j > 1 else pd.Timedelta(days=365)
+        ini_val = ini - max(dur * dur_validacion, pd.Timedelta(days=200))
+        m_mem0 = (banco.meta["fecha"] < ini_val).to_numpy()
+        m_val = ((banco.meta["fecha"] >= ini_val) & (banco.meta["fecha"] < ini)).to_numpy()
+        m_mem1 = (banco.meta["fecha"] < ini).to_numpy()
+        m_test = ((banco.meta["fecha"] >= ini) & (banco.meta["fecha"] < fin)).to_numpy()
+        if m_mem0.sum() < 500 or m_val.sum() < 100 or m_test.sum() < 20:
+            continue
+
+        # 1-2) memoria pasado-lejano -> predicciones de validacion -> meta
+        mem0 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem0))
+        val = submuestreo_no_solapado(banco.subconjunto(m_val), max(1, cfg.horizonte // 2))
+        fval, aval, _ = _predicciones_con_features(mem0, val)
+        if len(aval) < 80 or len(np.unique(aval)) < 2:
+            if verbose:
+                print(f"  pliegue {j}: validacion insuficiente, se salta")
+            continue
+        wval = pesos_unicidad(val.meta["fecha"].to_numpy("datetime64[ns]").astype("datetime64[D]")
+                              .astype(np.int64)[:len(aval)], np.full(len(aval), cfg.horizonte),
+                              cfg.horizonte) if len(aval) else None
+        meta = MetaModelo().entrenar(fval, aval, pesos=wval)
+
+        # 3) memoria con todo el pasado -> test -> seleccion por meta
+        mem1 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem1))
+        test = submuestreo_no_solapado(banco.subconjunto(m_test), paso_test)
+        ftest, atest, itest = _predicciones_con_features(mem1, test)
+        if len(atest) < 10:
+            continue
+        itest["acierto_primario"] = atest
+        itest["prob_meta"] = meta.prob_acierto(ftest)
+        itest["pliegue"] = j
+        todo.append(itest)
+        if verbose:
+            print(f"  pliegue {j}: memoria {m_mem1.sum()} | val {len(aval)} | test {len(atest)} "
+                  f"| meta AUC val≈{_auc(aval, meta.prob_acierto(fval)):.3f}")
+        if not imp_meta:
+            try:
+                imp_meta = meta.importancias(fval, aval)
+            except Exception:
+                imp_meta = {}
+
+    if not todo:
+        raise RuntimeError("No se pudo evaluar el meta-modelo (datos insuficientes).")
+    res = pd.concat(todo, ignore_index=True)
+    return res, imp_meta
+
+
+def _auc(y, p):
+    from sklearn.metrics import roc_auc_score
+    return roc_auc_score(y, p) if len(np.unique(y)) > 1 else float("nan")
+
+
+def informe_meta(res, coste_bps=10.0, titulo="META-LABELING"):
+    """Compara operar TODO vs operar solo lo que el meta selecciona."""
+    lineas = [f"\n{'=' * 74}", f"  {titulo}", "=" * 74]
+    n = len(res)
+    ac_bruto = res["acierto_primario"].mean()
+    lineas.append(f"Senales primarias: {n}  |  acierto bruto (operar todo): {ac_bruto:.2%}")
+
+    # retorno por operacion usando la etiqueta triple-barrera, con signo del lado
+    coste = coste_bps / 1e4 * 2
+    r_todo = res["lado"] * res["tb_ret"].fillna(0) - coste
+    lineas.append(f"Operar TODO: retorno medio/op {r_todo.mean():+.4f}  "
+                  f"Sharpe≈{_sharpe(r_todo):.2f}")
+
+    lineas += ["", "-- Seleccionando con el meta-modelo (varios umbrales) " + "-" * 20,
+               f"  {'umbral':>7}{'operadas':>10}{'cobertura':>11}{'precision':>11}"
+               f"{'ret/op':>10}{'Sharpe':>9}"]
+    mejor = None
+    for u in [0.45, 0.50, 0.55, 0.60, 0.65, 0.70]:
+        sel = res[res["prob_meta"] >= u]
+        if len(sel) < 15:
+            continue
+        prec = sel["acierto_primario"].mean()
+        r = sel["lado"] * sel["tb_ret"].fillna(0) - coste
+        sh = _sharpe(r)
+        cob = len(sel) / n
+        lineas.append(f"  {u:>7.2f}{len(sel):>10}{cob:>10.1%}{prec:>11.2%}"
+                      f"{r.mean():>+10.4f}{sh:>9.2f}")
+        cand = (sh, u, len(sel), prec, r.mean(), cob)
+        if mejor is None or sh > mejor[0]:
+            mejor = cand
+    if mejor:
+        sh, u, nop, prec, rop, cob = mejor
+        lo, hi = intervalo_acierto(prec * nop, nop)
+        lineas += ["",
+                   f"  MEJOR umbral {u:.2f}: opera el {cob:.0%} de las senales, "
+                   f"precision {prec:.2%} (IC95 [{lo:.1%},{hi:.1%}])",
+                   f"  -> el meta-modelo sube la precision de {ac_bruto:.2%} (todo) "
+                   f"a {prec:.2%} (seleccion), Sharpe {sh:.2f}"]
+    print("\n".join(lineas))
+    return {"acierto_bruto": float(ac_bruto), "mejor": mejor}
+
+
+def _sharpe(r, periodos=25):
+    r = np.asarray(r, float)
+    r = r[np.isfinite(r)]
+    if len(r) < 3 or r.std(ddof=1) == 0:
+        return float("nan")
+    return float(r.mean() / r.std(ddof=1) * np.sqrt(periodos))
