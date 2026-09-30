@@ -46,7 +46,13 @@ def _comunes(p):
     p.add_argument("--desde", default="2012-01-01", help="fecha inicial (yahoo)")
     p.add_argument("--largo", type=int, default=40, help="barras de la forma diaria")
     p.add_argument("--horizonte", type=int, default=10, help="barras a predecir hacia delante")
-    p.add_argument("--noticias", default="sintetica", choices=["sintetica", "csv", "ninguna"])
+    p.add_argument("--noticias", default="sintetica",
+                   choices=["sintetica", "reales", "csv", "ninguna"],
+                   help="'reales' usa titulares de Yahoo (solo para prediccion en vivo)")
+    p.add_argument("--intervalo", default="1d", help="temporalidad Yahoo: 1d, 1wk, 1mo, 1h, 15m...")
+    p.add_argument("--rango", default="5y", help="historico a descargar de Yahoo: 2y, 5y, max...")
+    p.add_argument("--sectores", type=lambda s: dict(x.split(":") for x in s.split(",")) if s else None,
+                   default=None, help="mapa ticker:sector, ej. AAPL:tecnologia,JPM:banca")
     p.add_argument("--noticias-csv", default="datos/noticias.csv")
     p.add_argument("--senal-noticias", type=float, default=0.0,
                    help="0 = noticias sin ventaja; >0 inyecta ventaja para el experimento de ablacion")
@@ -106,17 +112,25 @@ def cmd_predecir(args):
     objetivo = args.ticker
     if objetivo is None:
         objetivo = banco.meta["ticker"].iloc[-1]
-    casos = banco.subconjunto((banco.meta["ticker"] == objetivo).to_numpy())
-    if len(casos) == 0:
+    if objetivo not in set(banco.meta.ticker):
         raise SystemExit(f"No hay casos para {objetivo}. Disponibles: "
                          f"{sorted(banco.meta.ticker.unique())}")
-    pasado = banco.subconjunto((banco.meta["fecha"] < casos.meta["fecha"].iloc[-1]).to_numpy())
-    mem = MemoriaPatrones(banco.cfg, k=args.k, umbral_confianza=args.umbral_confianza).ajustar(pasado)
-    pred = mem.predecir(casos, len(casos) - 1)
+    # la memoria usa TODO el historico; el caso a predecir es el borde real del
+    # grafico (ultima barra), cuyo futuro aun no ha pasado.
+    from patrones.ventanas import caso_vivo
+    from patrones import noticias as _mn
+    mem = MemoriaPatrones(banco.cfg, k=args.k, umbral_confianza=args.umbral_confianza).ajustar(banco)
+    fn_vivo = _fuente_noticias(args, pre, ctx)
+    vivo = caso_vivo(pre, ctx, fn_vivo, banco.cfg, objetivo)
+    pred = mem.predecir(vivo, 0)
     print("\n" + "=" * 70)
-    print(f"  PREDICCION PARA {objetivo}  (ultimo tramo disponible)")
+    print(f"  PREDICCION PARA {objetivo}  (proximo tramo, desde {vivo.meta.fecha.iloc[0].date()})")
     print("=" * 70)
     print(pred.informe(8))
+
+    if getattr(args, "en_vivo", False):
+        _capa_en_vivo(objetivo, pre, banco)
+
     print("\nCono del camino esperado (retorno acumulado en multiplos de ATR):")
     for t in range(len(pred.camino)):
         c, lo, hi = pred.camino[t], pred.camino_p10[t], pred.camino_p90[t]
@@ -124,6 +138,52 @@ def cmd_predecir(args):
         print(f"  +{t + 1:>2} barras  p10 {lo:+5.1f}  esperado {c:+5.1f}  p90 {hi:+5.1f}  {barra}")
     print("\nAviso: esto es una herramienta de estudio con un modelo estadistico simple; "
           "no es una recomendacion de inversion.")
+
+
+def _fuente_noticias(args, pre, ctx):
+    """Reconstruye la fuente de noticias elegida, para el caso vivo."""
+    from patrones import noticias as mn
+    if args.noticias == "reales":
+        try:
+            from fuentes.noticias_reales import NoticiasReales
+            return NoticiasReales(list(pre.keys()))
+        except Exception:
+            return mn.SinNoticias()
+    if args.noticias == "sintetica":
+        return mn.NoticiasSinteticas(pre, semilla=args.semilla, senal=args.senal_noticias,
+                                     horizonte=args.horizonte)
+    return mn.SinNoticias()
+
+
+def _capa_en_vivo(ticker, precios, banco):
+    """Segunda opinion EN VIVO: scanner de TradingView + titulares recientes."""
+    print("\n" + "-" * 70)
+    print("  CAPA EN VIVO (datos del momento, no entran en el modelo historico)")
+    print("-" * 70)
+    try:
+        from fuentes import tradingview as tv
+        from fuentes.http import Cliente
+        cli = Cliente(ttl=300)
+        ex = None
+        if "exchange" in banco.meta.columns:
+            m = banco.meta[banco.meta.ticker == ticker]
+            ex = m["exchange"].iloc[0] if len(m) else None
+        if ex:
+            snap = tv.snapshot([tv.como_simbolo_tv(ticker, ex)], cliente=cli)
+        else:
+            snap = tv.snapshot_auto([ticker], cliente=cli)
+        if len(snap):
+            print(tv.bloque_informe(snap.iloc[0].to_dict()))
+        else:
+            print("  TradingView: sin datos para este simbolo.")
+    except Exception as e:
+        print(f"  TradingView no disponible: {e}")
+    try:
+        from fuentes.noticias_reales import NoticiasReales
+        fn = NoticiasReales([ticker])
+        print(fn.resumen_vivo(ticker))
+    except Exception as e:
+        print(f"  Noticias en vivo no disponibles: {e}")
 
 
 def _barra(c, lo, hi, ancho=40):
@@ -135,6 +195,45 @@ def _barra(c, lo, hi, ancho=40):
     linea[esc(0.0)] = "|"
     linea[esc(c)] = "#"
     return "".join(linea)
+
+
+def cmd_envivo(args):
+    """Panel en vivo sin tocar el modelo: scanner, titulares y calendario macro."""
+    from fuentes import tradingview as tv, forexfactory as ff
+    from fuentes.http import Cliente
+    from fuentes.noticias_reales import NoticiasReales
+    cli = Cliente(ttl=300)
+    print("\n" + "=" * 70 + "\n  ESTADO EN VIVO\n" + "=" * 70)
+    try:
+        snap = tv.snapshot_auto(args.tickers, region=args.region, cliente=cli)
+        cols = ["simbolo", "cierre", "cambio_pct", "rsi_1d", "rsi_1w", "adx",
+                "recomendacion_txt"]
+        if snap.empty:
+            print("\nTradingView: sin datos para esos simbolos.")
+        else:
+            print("\nTradingView (snapshot):")
+            print(snap[cols].round(2).to_string(index=False))
+    except Exception as e:
+        print(f"  TradingView no disponible: {e}")
+    try:
+        fn = NoticiasReales(args.tickers, cli)
+        for t in args.tickers:
+            print("\n" + fn.resumen_vivo(t))
+    except Exception as e:
+        print(f"  Noticias no disponibles: {e}")
+    try:
+        cal = ff.calendario("esta_semana", cli)
+        alto = cal[cal.impacto == "High"]
+        if args.monedas:
+            alto = alto[alto.pais.isin(args.monedas)]
+        print(f"\nCalendario macro de alto impacto esta semana "
+              f"({', '.join(args.monedas or ['todas'])}):")
+        if len(alto):
+            print(alto[["fecha", "pais", "evento", "prevision", "anterior"]].to_string(index=False))
+        else:
+            print("  Sin eventos de alto impacto para esas monedas esta semana.")
+    except Exception as e:
+        print(f"  Calendario no disponible: {e}")
 
 
 def main(argv=None):
@@ -168,7 +267,17 @@ def main(argv=None):
     pp = sub.add_parser("predecir", help="predice el proximo tramo de un valor")
     _comunes(pp)
     pp.add_argument("--ticker", default=None)
+    pp.add_argument("--en-vivo", action="store_true",
+                    help="anade la segunda opinion de TradingView y titulares recientes")
     pp.set_defaults(func=cmd_predecir)
+
+    pv = sub.add_parser("envivo", help="estado en vivo (TradingView + noticias + calendario)")
+    pv.add_argument("--tickers", type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+                    default=["AAPL", "MSFT", "NVDA"])
+    pv.add_argument("--region", default="america")
+    pv.add_argument("--monedas", type=lambda s: [x.strip() for x in s.split(",")] if s else None,
+                    default=["USD", "EUR"], help="monedas para el calendario macro")
+    pv.set_defaults(func=cmd_envivo)
 
     args = ap.parse_args(argv)
     try:

@@ -144,14 +144,44 @@ Para noticias reales, un CSV con columnas `fecha, ticker, titular`
 titulares con fecha real (*point-in-time*); etiquetar barras viejas con titulares
 descargados hoy mete información del futuro e invalida los resultados.
 
-### Con Yahoo Finance
+### Con datos reales del mercado (Yahoo + TradingView + Forex Factory)
+
+El paquete `fuentes/` conecta con tres servicios reales (todos probados en vivo):
+
+| Fuente | Qué aporta | Estado |
+|---|---|---|
+| **Yahoo Finance** | Histórico OHLCV (diario/semanal/mensual + intradía) y titulares por valor | ✅ funciona |
+| **TradingView** (scanner) | *Snapshot en vivo*: RSI multi-timeframe, MACD, ADX, Bollinger y su **recomendación técnica** agregada | ✅ sin login |
+| **Forex Factory** | Calendario macro (tipos, empleo, IPC…) con impacto Low/Med/High | ✅ feed JSON |
+
+**Por qué el histórico sale de Yahoo y no de TradingView:** TradingView no es una
+fuente de datos, es un visor que licencia datos de los exchanges. El histórico de
+velas de un valor **es el mismo** en Yahoo. El histórico de TradingView solo es
+accesible por un websocket con token de sesión que va contra sus Términos de
+Servicio, así que el proyecto **no lo usa**. Del scanner (que sí es público) se
+toma únicamente el snapshot en vivo, como "segunda opinión".
 
 ```bash
-python bot.py evaluar --fuente yahoo --tickers AAPL,MSFT,NVDA,JPM,XOM
+# Entrenar/evaluar con histórico real de Yahoo
+python bot.py evaluar  --fuente yahoo --tickers AAPL,MSFT,NVDA,JPM,XOM --rango 5y
+
+# Predecir el PRÓXIMO tramo (borde real del gráfico) + capa en vivo de TradingView
+python bot.py predecir --fuente yahoo --tickers AAPL,MSFT,NVDA,JPM,XOM \
+    --ticker JPM --en-vivo --noticias reales \
+    --sectores AAPL:tecnologia,JPM:banca,XOM:energia
+
+# Panel en vivo: scanner de TradingView + titulares + calendario macro
+python bot.py envivo --tickers AAPL,MSFT,NVDA,JPM --monedas USD,EUR
 ```
 
-(Requiere salida a internet a Yahoo; en algunos entornos Yahoo responde 429 y hay
-que usar CSV o el mercado sintético.)
+**Nota sobre las noticias reales:** los titulares de Yahoo y el calendario de
+Forex Factory son *recientes* (días), no un histórico de años. Por eso alimentan
+la **predicción en vivo** del último tramo, no el entrenamiento walk-forward:
+etiquetar barras viejas con titulares de hoy sería mirar al futuro. El sistema
+respeta esa regla siempre — solo usa titulares con fecha anterior a la barra.
+
+Si Yahoo responde 429 (pasa en algunos contenedores por la IP), espera un rato o
+usa `--fuente csv` / el mercado sintético.
 
 ## Estructura
 
@@ -168,7 +198,13 @@ patrones/
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
   pipeline.py            monta el universo y el banco de casos desde la CLI
-tests/                   21 tests; el grueso vigila que no se cuele información del futuro
+fuentes/
+  http.py                cliente HTTP con cache en disco y reintentos
+  yahoo.py               OHLCV histórico multi-timeframe y titulares por valor
+  tradingview.py         scanner en vivo (indicadores + recomendación técnica)
+  forexfactory.py        calendario macro (feed JSON)
+  noticias_reales.py     fuente de noticias reales compatible con el pipeline
+tests/                   26 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

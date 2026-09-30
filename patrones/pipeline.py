@@ -1,5 +1,9 @@
 """Monta el universo de datos y el banco de casos a partir de las opciones de la CLI."""
 import os
+from types import SimpleNamespace
+
+# opciones globales que las ramas de descarga leen sin ensuciar cada firma
+_OPCS = SimpleNamespace(intervalo="1d", rango="5y", sectores=None)
 
 from . import contexto as mod_ctx
 from . import datos as mod_datos
@@ -40,21 +44,13 @@ def cargar_universo(fuente="sintetico", carpeta="datos/sintetico", tickers=None,
         return pre, meta, idx, None
 
     if fuente == "yahoo":
-        import pandas as pd
+        from fuentes import yahoo as fy
         if not tickers:
             raise SystemExit("Con --fuente yahoo hay que pasar --tickers AAPL,MSFT,...")
-        pre = {}
-        for t in tickers:
-            if verbose:
-                print(f"  descargando {t}...")
-            try:
-                pre[t] = mod_datos.descargar_yfinance(t, desde=desde)
-            except Exception as e:
-                print(f"  {t}: fallo la descarga ({e})")
-        if not pre:
-            raise SystemExit("No se pudo descargar nada. Prueba --fuente csv o sintetico.")
-        meta = pd.DataFrame({"ticker": list(pre), "sector": "desconocido",
-                             "nombre": list(pre)})
+        intervalo = getattr(args_intervalo, "intervalo", "1d") if False else "1d"
+        pre, meta = fy.universo(tickers, intervalo=getattr(_OPCS, "intervalo", "1d"),
+                                rango=getattr(_OPCS, "rango", "5y"),
+                                sectores=getattr(_OPCS, "sectores", None), verbose=verbose)
         return pre, meta, None, None
 
     raise SystemExit(f"fuente desconocida: {fuente}")
@@ -62,6 +58,9 @@ def cargar_universo(fuente="sintetico", carpeta="datos/sintetico", tickers=None,
 
 def montar_banco(args, verbose=True):
     """Universo -> contexto -> noticias -> banco de casos etiquetado."""
+    _OPCS.intervalo = getattr(args, "intervalo", "1d")
+    _OPCS.rango = getattr(args, "rango", "5y")
+    _OPCS.sectores = getattr(args, "sectores", None)
     pre, meta, idx, reg = cargar_universo(
         args.fuente, args.carpeta, args.tickers, args.n_tickers, args.n_barras,
         args.semilla, args.desde, verbose)
@@ -69,6 +68,12 @@ def montar_banco(args, verbose=True):
 
     if args.noticias == "ninguna":
         fn = mod_noticias.SinNoticias()
+    elif args.noticias == "reales":
+        from fuentes.noticias_reales import NoticiasReales
+        fn = NoticiasReales(list(pre.keys()))
+        if verbose:
+            print(f"Noticias reales (Yahoo): {len(fn.df)} titulares recientes "
+                  "(solo para prediccion en vivo, no entrenamiento)")
     elif args.noticias == "csv":
         fn = mod_noticias.NoticiasCSV(args.noticias_csv)
         if verbose:

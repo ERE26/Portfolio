@@ -295,3 +295,51 @@ def etiquetar(banco, registro, tolerancia_dias=3):
             etiquetas[cerca] = nombre
     banco.meta["patron"] = etiquetas
     return banco
+
+
+def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None):
+    """Construye UN caso en la ultima barra disponible, sin exigir futuro.
+
+    Es lo que se necesita para predecir de verdad el borde del grafico (el
+    proximo tramo aun desconocido). A diferencia de 'construir', aqui no hay 'y'
+    ni 'camino' porque el futuro todavia no ha pasado: se rellenan con NaN. El
+    resto (forma, temporalidades superiores, indicadores, contexto) se calcula
+    igual, siempre con datos hasta hoy.
+    """
+    cfg = cfg or Config()
+    fuente_noticias = fuente_noticias or mod_noticias.SinNoticias()
+    df = precios[ticker].dropna()
+    n = len(df)
+    L = cfg.largo
+    if n < cfg.minimo_historia:
+        raise RuntimeError(f"{ticker}: {n} barras, hacen falta al menos {cfg.minimo_historia}")
+
+    rc = ctx.rasgos(ticker) if ctx is not None else None
+    rn = mod_noticias.rasgos_sentimiento(fuente_noticias, ticker, df.index,
+                                         cfg.dias_noticias, cfg.semivida_noticias) \
+        if not isinstance(fuente_noticias, mod_noticias.SinNoticias) else None
+    F = rasgos_escalares(df, rc, rn)
+
+    lc = np.log(df["close"].to_numpy(float))
+    lv = np.log(np.maximum(df["volume"].to_numpy(float), 1.0))
+    pos = np.array([n - 1])
+    formas = forma(ventanas_de(lc, L)[pos - L + 1])
+    formas_vol = forma(ventanas_de(lv, L)[pos - L + 1])
+    Mf = F.to_numpy(float)[pos]
+    atr_pct = F["atr_pct"].to_numpy(float)[pos]
+
+    fechas = df.index[pos]
+    tfs = {}
+    for nombre, regla in cfg.temporalidades.items():
+        m, _ = _formas_tf(df, regla, {"semanal": cfg.largo_semanal,
+                                      "mensual": cfg.largo_mensual}.get(nombre, 20), fechas)
+        tfs[nombre] = m
+
+    meta = pd.DataFrame({"ticker": ticker, "fecha": fechas,
+                         "sector": ctx.sector_de(ticker) if ctx is not None else "desconocido",
+                         "close": df["close"].to_numpy(float)[pos], "atr_pct": atr_pct})
+    y = pd.DataFrame({"ret": [np.nan], "direccion": [np.nan], "mfe": [np.nan], "mae": [np.nan]})
+    caminos = np.full((1, cfg.horizonte), np.nan, np.float32)
+    banco = BancoCasos(cfg, formas, formas_vol, tfs, Mf.astype(np.float32), meta, y, caminos)
+    banco.meta["patron"] = ""
+    return banco
