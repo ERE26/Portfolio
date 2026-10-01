@@ -115,6 +115,14 @@ def forma_vecino(mem, ticker, fecha):
 
 
 @st.cache_data(show_spinner=False)
+def _descargar_yahoo(ticker, intervalo):
+    """Descarga el historico de un ticker nuevo desde Yahoo (solo diario)."""
+    from fuentes import yahoo
+    df, _ = yahoo.historico(ticker, intervalo="1d", rango="max")
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def analizar(intervalo, anos, largo, horizonte, paso, k, ticker, n_similares):
     """Analiza un ticker: tramo actual, vecinos, explicacion y prediccion.
 
@@ -122,7 +130,20 @@ def analizar(intervalo, anos, largo, horizonte, paso, k, ticker, n_similares):
     B = construir_memoria(intervalo, anos, largo, horizonte, paso, k)
     mem, cfg, precios, ctx = B["mem"], B["cfg"], B["precios"], B["ctx"]
     if ticker not in precios:
-        return {"error": f"{ticker} no esta en el universo cargado."}
+        # ticker nuevo: se descarga de Yahoo al vuelo (solo diario) y se analiza
+        # como "no visto" (no entra en la memoria). ctx se reconstruye con el.
+        if intervalo != "1d":
+            return {"error": f"{ticker}: los tickers nuevos solo se pueden añadir en diario."}
+        try:
+            dfy = _descargar_yahoo(ticker, intervalo)
+        except Exception as e:
+            return {"error": f"No pude descargar {ticker} de Yahoo: {str(e)[:80]}"}
+        if dfy is None or len(dfy) < cfg.minimo_historia:
+            return {"error": f"{ticker}: histórico insuficiente desde Yahoo."}
+        precios = {**precios, ticker: dfy}
+        meta_ext = pd.concat([B["meta"], pd.DataFrame([{"ticker": ticker,
+                              "sector": "desconocido", "nombre": ticker}])], ignore_index=True)
+        ctx = mod_ctx.Contexto(precios, meta_ext)
     vivo = mod_v.caso_vivo(precios, ctx, None, cfg, ticker)
     pred = mem.predecir(vivo, 0, excluir_ticker=ticker)
     # evidencia: indicadores crudos del caso + voto de cada familia de indicadores
@@ -151,8 +172,9 @@ def analizar(intervalo, anos, largo, horizonte, paso, k, ticker, n_similares):
             "high": df["high"].tolist(), "low": df["low"].tolist(),
             "close": df["close"].tolist()}
     atr = float(pred.atr_pct)
+    sector = ctx.sector_de(ticker) if ctx is not None else "desconocido"
     return {
-        "ticker": ticker, "fecha": str(pred.fecha), "figura": desc_obj,
+        "ticker": ticker, "fecha": str(pred.fecha), "figura": desc_obj, "sector": sector,
         "prob_sube": float(pred.prob_sube), "ret_esperado": float(pred.ret_esperado),
         "confianza": float(pred.confianza), "abstencion": bool(pred.abstencion),
         "atr_pct": atr, "forma_obj": forma_obj,
@@ -326,13 +348,22 @@ def vista_detalle(r, horizonte):
             unsafe_allow_html=True)
 
 
+# sectores donde el sistema funciona mejor (del desglose walk-forward: ciclicos
+# y tendenciales; los defensivos rinden peor). Se resaltan en la tabla.
+SECTORES_FUERTES = {"financiero", "etf_indice", "tecnologia", "industrial",
+                    "materiales", "energia"}
+
+
 def tabla_comparativa(resultados):
     filas = []
     for r in resultados:
         if "error" in r:
             continue
+        sec = r.get("sector", "desconocido")
+        fuerte = sec in SECTORES_FUERTES
         filas.append({
             "Ticker": r["ticker"],
+            "Sector": ("✓ " if fuerte else "") + sec,
             "Sesgo": "▲ sube" if r["prob_sube"] > 0.5 else "▼ baja",
             "Prob. subida": r["prob_sube"],
             "Ret. esperado": r["ret_esperado"],
@@ -444,7 +475,10 @@ def leer_indicadores(feat, nombres, intra):
 # ======================================================================== app
 def main():
     st.set_page_config(page_title="Buscador de patrones", page_icon="📈", layout="wide")
-    st.title("📈 Buscador de patrones de trading")
+    st.markdown(f"<h1 style='margin-bottom:0'>📈 Buscador de patrones de trading</h1>"
+                f"<p style='color:{GRIS};margin-top:2px'>Trabajo de Fin de Grado · CUNEF Universidad"
+                f"  ·  sistema de aprendizaje de patrones con validación walk-forward</p>",
+                unsafe_allow_html=True)
     st.caption("Metes varios tickers → encuentra momentos históricos parecidos, explica por qué, "
                "y predice. Herramienta de estudio, no es recomendación de inversión.")
 
@@ -467,6 +501,14 @@ def main():
         defecto = [t for t in ["NVDA", "AAPL", "TSLA"] if t in disponibles][:3] or disponibles[:3]
         seleccion = st.multiselect(f"Tickers ({len(disponibles)} disponibles)", disponibles,
                                    default=defecto)
+        extra_txt = ""
+        if intervalo == "1d":
+            extra_txt = st.text_input("Otros tickers (Yahoo)", "",
+                                      placeholder="p.ej. INTC, SHOP",
+                                      help="Analiza valores fuera del universo; se descargan "
+                                           "de Yahoo al vuelo (solo diario).")
+        extra = [t.strip().upper() for t in extra_txt.replace(";", ",").split(",") if t.strip()]
+        seleccion = list(dict.fromkeys(seleccion + extra))   # une y quita duplicados
         n_similares = st.slider("Patrones parecidos a mostrar", 3, 12, 6)
         with st.expander("Parámetros avanzados"):
             largo = st.slider("Velas de la ventana (forma)", 20, 60, P["largo"])
@@ -514,6 +556,10 @@ def main():
             mejor = df.iloc[0]
             st.success(f"Señal más fiable ahora: **{mejor['Ticker']}** "
                        f"({mejor['Sesgo']}, confianza {mejor['Confianza']:.2f}).")
+            st.caption("El ✓ marca sectores donde el sistema funciona mejor "
+                       "(cíclicos/tendenciales); los defensivos rinden peor.")
+            st.download_button("⬇ Descargar comparación (CSV)", df.to_csv(index=False),
+                               file_name="comparacion_tickers.csv", mime="text/csv")
         st.divider()
 
     for r in resultados:
@@ -522,6 +568,11 @@ def main():
             continue
         with st.container(border=True):
             vista_detalle(r, horizonte)
+
+    st.divider()
+    st.caption("Herramienta de estudio con fines académicos (TFG, CUNEF Universidad). "
+               "No es recomendación de inversión. La confianza mostrada proviene de la "
+               "memoria de casos; el meta-modelo calibrado se usa en la validación.")
 
 
 if __name__ == "__main__":

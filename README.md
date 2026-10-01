@@ -559,8 +559,11 @@ Qué muestra:
 Cada ticker se analiza como "no visto": su propio histórico se excluye de los
 vecinos (`excluir_ticker`), así que el parecido se busca en los **demás** valores.
 Se elige la temporalidad (1 día / 1 h / 15 min) y los parámetros en la barra
-lateral. Para publicarla online basta con Streamlit Community Cloud (gratis) o un
-contenedor; en local no hace falta nada más.
+lateral. Además: se pueden **añadir tickers nuevos** fuera del universo (se
+descargan de Yahoo al vuelo, en diario), la tabla **resalta los sectores** donde el
+sistema funciona mejor, y la comparación se **exporta a CSV**. Para publicarla
+online basta con Streamlit Community Cloud (gratis) o un contenedor; en local no
+hace falta nada más.
 
 ## Confianza calibrada y validación anti-sobreajuste
 

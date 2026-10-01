@@ -20,7 +20,9 @@ añadir confianza a las señales. Ordenado por retorno sobre esfuerzo.
   1,54 > HRP 1,02; ensemble neutro). Razón: el sistema es selectivo y rara vez
   tiene muchas posiciones correladas abiertas a la vez, así que la covarianza solo
   añade ruido. Los módulos quedan para sistemas con muchas posiciones concurrentes.
-- ⬜ **Paso 4 — Interfaz** (calibración visible, Yahoo al vuelo, branding, export).
+- ✅ **Paso 4 — Interfaz** (`app.py`): panel "por qué" (voto por familia de
+  indicadores + ficha técnica), **ticker de Yahoo al vuelo**, **sectores fuertes
+  resaltados** en la comparación, **export a CSV**, y branding TFG/CUNEF.
 
 ## 1. Dónde funciona hoy el sistema (datos propios)
 
