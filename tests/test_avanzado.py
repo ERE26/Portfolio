@@ -272,3 +272,47 @@ def test_out_of_universe_divide_por_ticker():
     # las señales de test deben existir y llevar los recorridos para la rentabilidad
     assert len(res) > 20
     assert "cam_high" in res.columns and "prob_meta" in res.columns
+
+
+# ------------------------------------------------- indicadores intradia
+def test_intradia_deteccion_y_vwap():
+    """Detecta intradia y el VWAP de la sesion es coherente (entre low y high)."""
+    import numpy as np, pandas as pd
+    from patrones import intradia
+    # 2 dias de barras horarias
+    idx = pd.date_range("2024-03-01 09:30", periods=14, freq="1h")
+    df = pd.DataFrame({"open": 100 + np.arange(14) * 0.1, "high": 101 + np.arange(14) * 0.1,
+                       "low": 99 + np.arange(14) * 0.1, "close": 100.5 + np.arange(14) * 0.1,
+                       "volume": np.full(14, 1000.0)}, index=idx)
+    assert intradia.es_intradia(df.index)
+    r = intradia.rasgos_intradia(df)
+    assert set(intradia.NOMBRES_INTRA).issubset(r.columns)
+    # posicion en el rango entre 0 y 1
+    assert r["intra_pos_rango"].between(0, 1).all()
+    # hora codificada en [-1, 1]
+    assert r["intra_hora_sin"].between(-1, 1).all()
+
+
+def test_intradia_no_lookahead():
+    """El VWAP y la posicion en rango de la barra t no usan barras futuras."""
+    import numpy as np, pandas as pd
+    from patrones import intradia
+    idx = pd.date_range("2024-03-01 09:30", periods=7, freq="1h")
+    df = pd.DataFrame({"open": [100]*7, "high": [101]*7, "low": [99]*7,
+                       "close": [100, 100.5, 101, 100, 99.5, 100, 100.5],
+                       "volume": [1000]*7}, index=idx, dtype=float)
+    r1 = intradia.rasgos_intradia(df)
+    df2 = df.copy(); df2.iloc[5:] = df2.iloc[5:] * 2   # cambiar el futuro
+    r2 = intradia.rasgos_intradia(df2)
+    # las primeras 5 barras no cambian
+    assert np.allclose(r1["intra_dist_vwap"].iloc[:5], r2["intra_dist_vwap"].iloc[:5])
+
+
+def test_intradia_cero_en_diario():
+    """En serie diaria, las features intradia quedan en 0 (no aplican)."""
+    import numpy as np
+    from patrones import datos, contexto, ventanas
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=4, n_barras=900, semilla=1)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    for c in ["intra_dist_vwap", "intra_pos_rango", "intra_ret_sesion"]:
+        assert (b.feat[:, b.nombres_feat.index(c)] == 0).all()

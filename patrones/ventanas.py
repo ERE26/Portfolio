@@ -60,6 +60,8 @@ GRUPOS_ESCALARES = {
     "institucional": ["inst_presencia", "inst_peso", "inst_cambio", "inst_nuevo"],
     "factores": ["mom_12_1", "fac_earnings_yield", "fac_sales_price", "fac_margen_neto",
                  "fac_roe", "fac_estab_beneficio", "fac_size"],
+    "intradia": ["intra_dist_vwap", "intra_pos_rango", "intra_hora_sin", "intra_hora_cos",
+                 "intra_vol_rel", "intra_gap", "intra_ret_sesion"],
 }
 NOMBRES_ESCALARES = [c for cols in GRUPOS_ESCALARES.values() for c in cols]
 
@@ -101,6 +103,15 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extr
         out[f"ret_{n}"] = np.log(c / c.shift(n))
     out["mom_12_1"] = ind.momentum_12_1(c)
     out["pos_sma50"] = c / sma50 - 1.0
+    # indicadores intradia (solo si la serie es intradia; en diario quedan en 0)
+    from .intradia import es_intradia, rasgos_intradia, NOMBRES_INTRA
+    if es_intradia(df.index):
+        ri = rasgos_intradia(df)
+        for col in NOMBRES_INTRA:
+            out[col] = ri[col]
+    else:
+        for col in NOMBRES_INTRA:
+            out[col] = 0.0
     out["pos_sma200"] = c / sma200 - 1.0
     out["pend_sma50"] = ind.pendiente(sma50, 20)
     out["dist_max252"], out["dist_min252"] = dmax, dmin
