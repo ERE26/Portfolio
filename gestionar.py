@@ -33,21 +33,39 @@ UNIVERSO = sorted(set(LIQUIDOS + [
     "TGT", "GM", "F", "GILD", "AMGN", "VRTX", "ISRG", "LMT", "RTX", "SLB",
     "OXY", "PSX", "MPC", "FCX", "NEM", "XLE", "XLV", "XLY", "SMH", "QQQ"]))
 
+# EUROPA intradia: Alpaca no da acceso directo a las bolsas europeas (Xetra,
+# Euronext...), pero SI a los ADRs de empresas europeas y a los ETFs de Europa
+# cotizados en EE.UU. (verificado tradable + con datos de 15m). Se operan durante el
+# horario de EE.UU. con la MISMA estrategia de confluencia. Da exposicion europea
+# real. (Ojo: el subyacente europeo ya ha cotizado antes, asi que estos ADRs/ETFs
+# suelen abrir con gap por la sesion europea: util para catalizadores.)
+EUROPA = [
+    # ADRs de grandes empresas europeas (NYSE/NASDAQ)
+    "ASML", "SAP", "NVO", "NVS", "AZN", "SHEL", "BP", "TTE", "UL", "DEO",
+    "RELX", "SNY", "STLA", "SPOT", "ERIC", "ING", "BCS", "NOK", "PHG", "E", "BUD",
+    # ETFs de paises/region de Europa
+    "VGK", "FEZ", "EZU", "HEDJ", "EWG", "EWU", "EWQ", "EWP", "EWL", "EWN", "EWI", "EWD"]
+
 # Umbrales de CALIDAD para comprar (confluencia, no "el minimo"): ver abajo.
 EXT_MAX = 4.0          # no perseguir: como mucho 4 ATR por encima del VWAP
 MARGEN_FR = 0.002      # fuerza relativa: batir al mercado por >=0.2% hoy
 RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
 
 
-def universo_dinamico():
-    """Universo operable = la lista base MAS los descubrimientos recientes de la
-    watchlist. Asi el radar crece y rota en vez de mirar siempre los mismos nombres."""
+def universo_dinamico(con_europa=True):
+    """Universo operable = base (EE.UU.) + EUROPA (ADRs/ETFs europeos cotizados en
+    EE.UU.) + descubrimientos recientes de la watchlist. Mas donde ELEGIR; la
+    confluencia de calidad decide. Los europeos compiten de igual a igual: se opera
+    el mejor, sea de EE.UU. o de Europa."""
     try:
         from descubrir import watchlist_vigente
         extra = watchlist_vigente()
     except Exception:
         extra = []
-    return sorted(set(UNIVERSO) | set(extra))
+    u = set(UNIVERSO) | set(extra)
+    if con_europa:
+        u |= set(EUROPA)
+    return sorted(u)
 
 
 def señal(ticker, intervalo="15Min"):
