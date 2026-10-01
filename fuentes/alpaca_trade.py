@@ -126,6 +126,30 @@ def cerrar_todo(confirmar=False):
     return {"cerradas": list(pos.keys()), "status": r.status_code}
 
 
+def cerrar_posiciones(tickers, confirmar=False):
+    """Cierra posiciones concretas (cancelando antes sus ordenes bracket). Para la
+    gestion activa: cortar las intradia que se giran. Con confirmar=False, dry-run."""
+    pos = posiciones()
+    a = [t for t in tickers if t in pos]
+    if not confirmar:
+        return {"dry_run": True, "cerraria": a}
+    abiertas = ordenes_abiertas()
+    cerradas = []
+    for t in a:
+        for o in abiertas:
+            if o.get("symbol") == t:
+                try:
+                    requests.delete(_url(f"orders/{o['id']}"), headers=_headers(), timeout=30)
+                except Exception:
+                    pass
+        try:
+            r = requests.delete(_url(f"positions/{t}"), headers=_headers(), timeout=30)
+            cerradas.append((t, r.status_code, pos[t]["pl"]))
+        except Exception as e:
+            cerradas.append((t, str(e)[:40], pos[t]["pl"]))
+    return {"cerradas": cerradas}
+
+
 def cerrar_intradia(confirmar=False):
     """Cierra SOLO el book intradia (las posiciones con ordenes bracket abiertas)
     y cancela esos brackets. El swing (sin ordenes pendientes) no se toca.
