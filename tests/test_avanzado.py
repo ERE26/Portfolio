@@ -817,3 +817,39 @@ def test_watchlist_persistente(tmp_path, monkeypatch):
                "VIEJO": (pd.Timestamp.now() - pd.Timedelta(days=10)).isoformat()},
               open(wl, "w"))
     assert "VIEJO" not in D.watchlist_vigente()
+
+
+def test_bitacora_registrar_aprender(tmp_path, monkeypatch):
+    """La bitacora guarda motivo + patron + velas + foto; al cerrar guarda el
+    resultado; y aprende win-rate por patron."""
+    import numpy as np, pandas as pd
+    import bitacora as B
+    monkeypatch.setattr(B, "DIR", str(tmp_path))
+    n = 60
+    close = np.linspace(100, 120, n) + np.random.default_rng(0).normal(0, 0.5, n)
+    df = pd.DataFrame({"open": close, "high": close*1.01, "low": close*0.99,
+                       "close": close, "volume": np.full(n, 1e6)})
+    feats = {"rvol": 2.1, "dist_vwap": 0.012, "ret_sesion": 0.009, "atr_pct": 0.01,
+             "sent_noticias": 0.0}
+    sid = B.registrar("MU", df, feats, entrada=120.0, tp=122.0, sl=119.0, conviccion=1.8)
+    import os, json
+    rec = json.load(open(os.path.join(str(tmp_path), sid + ".json")))
+    assert "RVOL 2.10" in rec["motivo"] and "conviccion +1.80" in rec["motivo"]
+    assert rec["patron"]["tendencia"] in ("alcista", "lateral", "bajista")
+    assert len(rec["velas"]) > 0 and os.path.exists(rec.get("foto", ""))
+    # cerrar la operacion
+    assert B.marcar_resultado(sid, "win", 85.0, 122.0) is True
+    # otra operacion perdedora para que aprender tenga ambas clases
+    sid2 = B.registrar("GM", df, feats, 120.0, 122.0, 119.0, conviccion=1.1)
+    B.marcar_resultado(sid2, "loss", -40.0, 119.0)
+    a = B.aprender(min_pat=1)
+    assert a["n"] == 2 and 0 <= a["win_rate_global"] <= 1
+    assert "por_patron" in a
+
+
+def test_bitacora_motivo_legible():
+    """El motivo describe en lenguaje claro por que se opero."""
+    import bitacora as B
+    m = B.describir_motivo({"rvol": 1.7, "dist_vwap": -0.004, "ret_sesion": 0.011,
+                            "sent_noticias": -0.2}, conviccion=0.9)
+    assert "RVOL 1.70" in m and "bajo VWAP" in m and "noticias negativas" in m

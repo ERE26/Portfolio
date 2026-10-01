@@ -20,13 +20,16 @@ from fuentes import alpaca_trade as AT
 LOG = "datos/trades_intradia.csv"
 CFG = "datos/selectividad.json"
 COLS = ["ts", "ticker", "qty", "entrada", "tp", "sl", "rvol", "dist_vwap",
-        "ret_sesion", "atr_pct", "sent_noticias", "hora", "salida", "salida_ts",
-        "pnl", "resultado"]
+        "ret_sesion", "atr_pct", "sent_noticias", "hora", "snapshot", "salida",
+        "salida_ts", "pnl", "resultado"]
 MIN_TRADES = 25           # minimo para fiarse del analisis y afinar umbrales
 
 
-def registrar_entrada(ticker, qty, precio, tp, sl, feats):
-    """Anota una entrada intradia con sus caracteristicas (resultado='open')."""
+def registrar_entrada(ticker, qty, precio, tp, sl, feats, snapshot=""):
+    """Anota una entrada intradia con sus caracteristicas (resultado='open').
+
+    snapshot: id de la bitacora (bitacora.registrar) con el porque, el patron de
+    velas y la foto de la entrada. Enlaza el resultado con su contexto para aprender."""
     os.makedirs("datos", exist_ok=True)
     fila = {"ts": pd.Timestamp.now().isoformat(), "ticker": ticker, "qty": int(qty),
             "entrada": round(float(precio), 4), "tp": tp, "sl": sl,
@@ -35,8 +38,8 @@ def registrar_entrada(ticker, qty, precio, tp, sl, feats):
             "ret_sesion": round(float(feats.get("ret_sesion", float("nan"))), 5),
             "atr_pct": round(float(feats.get("atr_pct", float("nan"))), 5),
             "sent_noticias": round(float(feats.get("sent_noticias", 0.0)), 3),
-            "hora": pd.Timestamp.now().strftime("%H:%M"), "salida": "", "salida_ts": "",
-            "pnl": "", "resultado": "open"}
+            "hora": pd.Timestamp.now().strftime("%H:%M"), "snapshot": snapshot,
+            "salida": "", "salida_ts": "", "pnl": "", "resultado": "open"}
     df = pd.read_csv(LOG) if os.path.exists(LOG) else pd.DataFrame(columns=COLS)
     df = pd.concat([df, pd.DataFrame([fila])], ignore_index=True)
     df.to_csv(LOG, index=False)
@@ -78,7 +81,16 @@ def reconciliar():
             df.at[i, "salida"] = round(precio_salida, 4)
             df.at[i, "salida_ts"] = v.get("transaction_time", "")
             df.at[i, "pnl"] = round(pnl, 2)
-            df.at[i, "resultado"] = "win" if pnl > 0 else "loss"
+            resultado = "win" if pnl > 0 else "loss"
+            df.at[i, "resultado"] = resultado
+            # enlaza el desenlace con la bitacora (porque + patron + foto) para aprender
+            sid = str(row.get("snapshot", "") or "")
+            if sid:
+                try:
+                    from bitacora import marcar_resultado
+                    marcar_resultado(sid, resultado, pnl, precio_salida)
+                except Exception:
+                    pass
             usadas.add(j)
             cerradas += 1
             break

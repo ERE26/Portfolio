@@ -237,12 +237,31 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                     if r.get("id"):
                         colocadas += 1
                         sn = float(s.get("sent", 0.0))   # sentimiento ya calculado en el ranking
-                        registrar_entrada(s["ticker"], qty, precio, tp, sl,
-                                          {"rvol": s["rvol"], "dist_vwap": s["dist_vwap"],
-                                           "ret_sesion": s["ret_sesion"], "atr_pct": s["atr_pct"],
-                                           "sent_noticias": sn})
+                        feats = {"rvol": s["rvol"], "dist_vwap": s["dist_vwap"],
+                                 "ret_sesion": s["ret_sesion"], "atr_pct": s["atr_pct"],
+                                 "sent_noticias": sn}
+                        # BITACORA: guarda el porque, el patron de velas y una foto
+                        # de la entrada (para aprender del contexto, no solo del PL).
+                        sid = ""
+                        try:
+                            import bitacora
+                            dsd = (pd.Timestamp.now() - pd.Timedelta(days=2)).strftime("%Y-%m-%d")
+                            dfw = alpaca.historico(s["ticker"], "15Min", desde=dsd, max_paginas=4)
+                            sid = bitacora.registrar(s["ticker"], dfw, feats, precio, tp, sl,
+                                                     conviccion=float(s.get("conviccion", float("nan"))))
+                        except Exception:
+                            sid = ""
+                        registrar_entrada(s["ticker"], qty, precio, tp, sl, feats, snapshot=sid)
+                        pat = ""
+                        if sid:
+                            try:
+                                import bitacora as _b, json as _j, os as _o
+                                _r = _j.load(open(_o.path.join(_b.DIR, sid + ".json")))
+                                pat = f" | patron: {_r['patron'].get('figura')}/{_r['patron'].get('tendencia')}"
+                            except Exception:
+                                pat = ""
                         print(f"  LARGO {qty} {s['ticker']} @~${precio:.2f} -> TP ${tp} / SL ${sl}"
-                              f"  (conv {s.get('conviccion', float('nan')):+.2f}, sent {sn:+.2f})  OK")
+                              f"  (conv {s.get('conviccion', float('nan')):+.2f}, sent {sn:+.2f}){pat}  OK")
                     else:
                         print(f"  {s['ticker']}: {r}")
                 except Exception as e:
