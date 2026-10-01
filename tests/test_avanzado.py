@@ -349,6 +349,25 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_conviccion_min_filtra_decididas():
+    """La regla conviccion_min opera solo donde el primario se inclina con fuerza
+    (|prob-0.5| en el cuantil superior)."""
+    import numpy as np, pandas as pd
+    from patrones import rentabilidad
+    rng = np.random.default_rng(0); n = 400
+    res = pd.DataFrame({
+        "lado": np.ones(n), "prob_meta": rng.uniform(0.5, 0.8, n),
+        "prob": rng.uniform(0.3, 0.9, n), "pliegue": 1, "mkt_alcista": 1.0,
+        "cam_high": [rng.uniform(0, 3, 6) for _ in range(n)],
+        "cam_low": [rng.uniform(-3, 0, 6) for _ in range(n)],
+        "cam_close": [rng.uniform(-2, 2, 6) for _ in range(n)]})
+    base = {"permitir_cortos": False, "solo_mercado_alcista": False, "evitar_vol_baja": False}
+    sel, _ = rentabilidad.aplicar_sistema(res, reglas={**base, "conviccion_min": 0.5})
+    conv = (sel["prob"] - 0.5).abs()
+    # todas las operadas tienen conviccion >= la mediana global
+    assert conv.min() >= (res["prob"] - 0.5).abs().median() - 1e-9
+
+
 def test_asignador_walk_forward():
     """El asignador combina alfas con pesos que suman 1 cada mes, usando solo
     historia (walk-forward), y produce métricas finitas."""

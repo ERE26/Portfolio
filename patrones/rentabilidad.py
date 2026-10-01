@@ -149,6 +149,7 @@ REGLAS_SISTEMA = {
     "vol_objetivo": None,       # ATR% de referencia para escalar inverso a la volatilidad
     "solo_sectores": None,      # lista de sectores a operar (p.ej. ciclicos); None = todos
     "caps_horizonte": None,     # ensemble: lista de horizontes de salida a promediar (p.ej. [5,10,15])
+    "conviccion_min": None,     # exigir conviccion del primario alta (cuantil de |prob-0.5|)
 }
 
 
@@ -194,6 +195,11 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
         m &= d["rvol"] >= r["rvol_min"]          # filtro "stocks in play": volumen anormal
     if r.get("solo_sectores") and "sector" in d:
         m &= d["sector"].isin(r["solo_sectores"])  # p.ej. operar solo sectores ciclicos
+    if r.get("conviccion_min") is not None and "prob" in d:
+        # exigir que el primario se incline con fuerza (no una señal 50/50): operar
+        # solo donde la conviccion esta en el cuantil superior. Mejora la calidad.
+        conv = (d["prob"] - 0.5).abs()
+        m &= conv >= conv.quantile(r["conviccion_min"])
     if r.get("permitir_cortos") and "mkt_alcista" in d:
         # a favor del regimen: largos cuando el mercado sube, cortos cuando cae.
         alcista = d["mkt_alcista"] > 0.5
