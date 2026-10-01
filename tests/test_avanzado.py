@@ -349,6 +349,19 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_pesos_unicidad_penaliza_solapamiento():
+    """Casos cuyos horizontes se solapan (periodo denso) reciben MENOS peso que
+    los aislados: es lo que evita sobre-representar periodos concurridos."""
+    import numpy as np
+    from patrones.etiquetado import pesos_unicidad
+    # 3 casos amontonados (dias 0,1,2) + 3 aislados (dias 100,200,300), horizonte 10
+    fechas = np.array(["2020-01-01", "2020-01-02", "2020-01-03",
+                       "2020-06-01", "2020-09-01", "2020-12-01"], dtype="datetime64[D]")
+    w = pesos_unicidad(fechas, np.full(6, 10), 10)
+    assert w[:3].mean() < w[3:].mean()        # los solapados pesan menos
+    assert abs(w.mean() - 1.0) < 1e-5          # normalizados a media 1
+
+
 def test_transversal_sin_lookahead_y_signo():
     """El momento transversal no mira al futuro y selecciona al alza al ticker que
     tendencia arriba frente al que tendencia abajo."""

@@ -401,13 +401,17 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         np_ef = n_procesos if primario == "memoria" else 1  # GBM ya es rapido en batch
         gen = (lambda m, b: _predicciones_paralelo(m, b, np_ef)) if np_ef > 1 \
             else _predicciones_con_features
-        fval, aval, _, _ = gen(mem0, val)
+        fval, aval, _, idx_val = gen(mem0, val)
         if len(aval) < 80 or len(np.unique(aval)) < 2:
             if verbose:
                 print(f"  pliegue {j}: validacion insuficiente, se salta")
             continue
-        wval = pesos_unicidad(val.meta["fecha"].to_numpy("datetime64[ns]").astype("datetime64[D]")
-                              .astype(np.int64)[:len(aval)], np.full(len(aval), cfg.horizonte),
+        # pesos de unicidad ALINEADOS a los casos realmente predichos (idx_val): los
+        # que se abstienen se descartan y pueden estar dispersos, asi que no vale
+        # tomar las primeras len(aval) fechas.
+        fechas_val = (val.meta["fecha"].to_numpy("datetime64[ns]").astype("datetime64[D]")
+                      .astype(np.int64)[idx_val])
+        wval = pesos_unicidad(fechas_val, np.full(len(aval), cfg.horizonte),
                               cfg.horizonte) if len(aval) else None
         meta = MetaModelo().entrenar(fval, aval, pesos=wval, calibrar=calibrar_meta)
 
