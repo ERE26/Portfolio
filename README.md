@@ -529,6 +529,39 @@ valioso como los positivos. Ambas mecánicas (`salida_cierre`, `rvol_min`) queda
 en el sistema para quien quiera operar día-trading estricto, aunque aquí rinda
 menos.
 
+## Interfaz visual (Streamlit)
+
+Todo lo anterior se puede usar desde una **interfaz interactiva**: metes uno o
+varios tickers y la app busca los patrones, los compara y los explica, de forma
+visual. Es un envoltorio del mismo motor (`caso_vivo` + memoria), sin lógica de
+predicción nueva.
+
+```bash
+pip install -r requirements.txt     # incluye streamlit y plotly
+python bot.py descargar --intervalos 1d          # datos diarios (si no los tienes)
+python bot.py descargar-intraday --intervalo 1Hour   # intradía (opcional, claves Alpaca)
+streamlit run app.py
+```
+
+![Interfaz Streamlit](figuras/20_interfaz.png)
+
+Qué muestra:
+
+- **Comparación entre tickers:** una tabla que los ordena por la **fiabilidad** de
+  la señal ahora mismo (confianza del sistema), y señala el más fiable.
+- **Por cada ticker:** el tramo actual en velas con la **proyección esperada**
+  (banda p10–p90), la **forma actual superpuesta a la de los patrones parecidos**
+  (se *ve* el parecido), y la predicción con su confianza (si es baja, avisa de
+  que "se abstendría").
+- **Patrones más parecidos:** para cada uno, su mini-gráfico, **por qué se parece**
+  (qué indicadores coinciden), y **lo que pasó después** (retorno y recorrido).
+
+Cada ticker se analiza como "no visto": su propio histórico se excluye de los
+vecinos (`excluir_ticker`), así que el parecido se busca en los **demás** valores.
+Se elige la temporalidad (1 día / 1 h / 15 min) y los parámetros en la barra
+lateral. Para publicarla online basta con Streamlit Community Cloud (gratis) o un
+contenedor; en local no hace falta nada más.
+
 ## Uso
 
 ```bash
@@ -605,7 +638,8 @@ usa `--fuente csv` / el mercado sintético.
 ## Estructura
 
 ```
-bot.py                   CLI: demo / simular / evaluar / predecir
+bot.py                   CLI: demo / simular / evaluar / predecir / buscar
+app.py                   interfaz visual (Streamlit): metes tickers y compara patrones
 patrones/
   indicadores.py         RSI, MACD, ADX, Bollinger, ATR, OBV... (sin mirar al futuro)
   datos.py               CSV, yfinance y generador de mercado sintético con patrones plantados

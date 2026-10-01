@@ -7,3 +7,6 @@ Pillow>=9.0
 requests>=2.28      # conectores a Yahoo, TradingView y Forex Factory
 # Opcionales segun la fuente de datos:
 yfinance>=0.2      # solo para --fuente yahoo
+# Interfaz visual (app.py):
+streamlit>=1.30    # interfaz interactiva: streamlit run app.py
+plotly>=5.18       # graficos interactivos de la interfaz

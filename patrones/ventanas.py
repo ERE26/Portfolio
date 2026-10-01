@@ -422,6 +422,12 @@ def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None, en
     formas = forma(ventanas_de(lc, L)[pos - L + 1])
     formas_vol = forma(ventanas_de(lv, L)[pos - L + 1])
     Mf = F.to_numpy(float)[pos]
+    # los factores value/quality solo tienen sentido tras la normalizacion
+    # cross-sectional del banco (imposible en un caso suelto): se neutralizan a 0,
+    # igual que un banco construido sin factores. Si no, su NaN contamina la
+    # distancia del grupo "factores" y la prediccion sale NaN.
+    idx_fac = [i for i, c in enumerate(NOMBRES_ESCALARES) if c.startswith("fac_")]
+    Mf[:, idx_fac] = np.nan_to_num(Mf[:, idx_fac], nan=0.0)
     atr_pct = F["atr_pct"].to_numpy(float)[pos]
 
     fechas = df.index[pos]
