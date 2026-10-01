@@ -601,3 +601,48 @@ def test_filtro_rvol_y_eod_en_aplicar_sistema():
     # todas las operadas cumplen el filtro RVOL y tienen barra posterior (EOD)
     assert (sel["rvol"] >= 1.5).all()
     assert (sel["barras_hasta_cierre"] >= 1).all()
+
+
+def test_rankear_conviccion_gate_y_orden(monkeypatch):
+    """El ranking por conviccion descarta el catalizador muy negativo (gate) y
+    ordena por confluencia (RVOL + ret_sesion + sentimiento). Sin red: se
+    monkeypatchea el sentimiento de noticias."""
+    import pandas as pd
+    import gestionar as G
+    sent = {"AAA": 0.4, "BBB": 0.0, "CCC": -0.6, "DDD": 0.2}
+    monkeypatch.setattr(G, "_sentimiento", lambda t: sent.get(t, 0.0))
+    opo = pd.DataFrame({
+        "ticker": ["AAA", "BBB", "CCC", "DDD", "EEE"],
+        "rvol":   [2.0,   1.8,   2.5,   1.6,   1.2],   # EEE no es fuerte (<1.5)
+        "ret_sesion": [0.01, 0.015, 0.02, 0.008, 0.03],
+        "dist_vwap": [0.005]*5, "atr_pct": [0.01]*5, "precio": [100.0]*5,
+    })
+    r = G.rankear_conviccion(opo, umbral_fuerte=1.5)
+    tickers = list(r["ticker"])
+    assert "EEE" not in tickers          # filtrado por RVOL < umbral
+    assert "CCC" not in tickers          # descartado por el gate (sent -0.6 < -0.35)
+    assert set(tickers) == {"AAA", "BBB", "DDD"}
+    # el score de conviccion esta ordenado de mayor a menor
+    assert list(r["conviccion"]) == sorted(r["conviccion"], reverse=True)
+    # a igualdad de RVOL y ret_sesion, el catalizador positivo desempata al alza
+    par = pd.DataFrame({
+        "ticker": ["POS", "NEU"], "rvol": [2.0, 2.0], "ret_sesion": [0.01, 0.01],
+        "dist_vwap": [0.005, 0.005], "atr_pct": [0.01, 0.01], "precio": [100.0, 100.0]})
+    sent2 = {"POS": 0.5, "NEU": 0.0}
+    monkeypatch.setattr(G, "_sentimiento", lambda t: sent2.get(t, 0.0))
+    rp = G.rankear_conviccion(par, umbral_fuerte=1.5)
+    assert list(rp["ticker"]) == ["POS", "NEU"]
+
+
+def test_rankear_conviccion_excluir_y_vacio(monkeypatch):
+    """Excluye lo ya en cartera y devuelve vacio si no queda candidato fuerte."""
+    import pandas as pd
+    import gestionar as G
+    monkeypatch.setattr(G, "_sentimiento", lambda t: 0.0)
+    opo = pd.DataFrame({
+        "ticker": ["AAA", "BBB"], "rvol": [2.0, 1.1],
+        "ret_sesion": [0.01, 0.01], "dist_vwap": [0.005, 0.005],
+        "atr_pct": [0.01, 0.01], "precio": [100.0, 100.0]})
+    r = G.rankear_conviccion(opo, umbral_fuerte=1.5, excluir={"AAA"})
+    assert len(r) == 0                   # AAA excluida, BBB no es fuerte
+    assert len(G.rankear_conviccion(pd.DataFrame(), 1.5)) == 0

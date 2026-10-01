@@ -111,6 +111,47 @@ def escaneo_diario(n=8):
     return mom.head(n)
 
 
+def _sentimiento(ticker):
+    """Sentimiento de noticias recientes (catalizador). 0.0 si no hay datos."""
+    try:
+        from fuentes import noticias_vivo
+        return float(noticias_vivo.noticias(ticker, n=3)["sentimiento"])
+    except Exception:
+        return 0.0
+
+
+def _z(s):
+    """z-score transversal; 0 si no hay dispersion (evita dividir por ~0)."""
+    s = pd.Series(list(s), dtype=float)
+    sd = float(s.std(ddof=0))
+    return (s - s.mean()) / sd if sd > 1e-9 else s * 0.0
+
+
+def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35):
+    """Ordena los candidatos FUERTES por un score de CONVICCION por confluencia y
+    aplica un GATE de catalizador (no comprar contra una noticia claramente mala).
+
+    conviccion = z(rvol) + z(ret_sesion) + 0.5*catalizador, con catalizador = el
+    sentimiento de noticias acotado a [-1, 1] (positivo suma, negativo resta). Si
+    el sentimiento es muy negativo (< gate_neg) el candidato se DESCARTA: un RVOL
+    alto con mala noticia suele ser ruido/trampa, no oportunidad. La evidencia es
+    clara (docs/aprendizaje_quant.md): ~95% del alfa esta en QUE eliges; las
+    noticias valen como filtro de 'razon real', no como senal direccional. Elegir
+    las mejores por confluencia es exactamente calidad > cantidad."""
+    if opo is None or len(opo) == 0:
+        return opo
+    d = opo[(opo["rvol"] >= umbral_fuerte) & (~opo["ticker"].isin(set(excluir)))].copy()
+    if len(d) == 0:
+        return d
+    d["sent"] = [_sentimiento(t) for t in d["ticker"]]
+    d = d[d["sent"] >= gate_neg].copy()        # gate: fuera catalizador muy negativo
+    if len(d) == 0:
+        return d
+    cat = d["sent"].clip(-1, 1)
+    d["conviccion"] = _z(d["rvol"]).to_numpy() + _z(d["ret_sesion"]).to_numpy() + 0.5 * cat.to_numpy()
+    return d.sort_values("conviccion", ascending=False).reset_index(drop=True)
+
+
 def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     pos = AT.posiciones()
     rev = revisar_intradia()
@@ -148,7 +189,8 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
         held = set(pos) - set(a_cerrar)
         intradia_vivas = len(rev) - len(a_cerrar)      # brackets que siguen abiertos
         libres = max(N_OBJETIVO - intradia_vivas, 0)
-        fuertes = opo[(opo["rvol"] >= RVOL_FUERTE) & (~opo["ticker"].isin(held))] if len(opo) else opo
+        # ranking por CONVICCION (confluencia) + gate de catalizador de noticias
+        fuertes = rankear_conviccion(opo, RVOL_FUERTE, excluir=held)
         if libres and len(fuertes):
             cfg = CONFIG["15Min"]
             cash = float(AT.cuenta()["cash"])
@@ -156,7 +198,8 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
             # mas candidatos de los huecos, por si alguno falla; TP/SL con el precio ACTUAL
             abrir = fuertes.head(libres + 3)
             px_now = AT.precio_actual(list(abrir["ticker"]))
-            print(f"\nReinvirtiendo (hasta {libres}) en oportunidades FUERTES (RVOL>={RVOL_FUERTE}):")
+            print(f"\nReinvirtiendo (hasta {libres}) por CONVICCION (RVOL>={RVOL_FUERTE} "
+                  f"+ gate de noticias):")
             colocadas = 0
             for _, s in abrir.iterrows():
                 if colocadas >= libres:
@@ -171,17 +214,13 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                     r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True)
                     if r.get("id"):
                         colocadas += 1
-                        # registrar la entrada con sus caracteristicas (para aprender)
-                        try:
-                            from fuentes import noticias_vivo
-                            sn = noticias_vivo.noticias(s["ticker"], n=3)["sentimiento"]
-                        except Exception:
-                            sn = 0.0
+                        sn = float(s.get("sent", 0.0))   # sentimiento ya calculado en el ranking
                         registrar_entrada(s["ticker"], qty, precio, tp, sl,
                                           {"rvol": s["rvol"], "dist_vwap": s["dist_vwap"],
                                            "ret_sesion": s["ret_sesion"], "atr_pct": s["atr_pct"],
                                            "sent_noticias": sn})
-                        print(f"  LARGO {qty} {s['ticker']} @~${precio:.2f} -> TP ${tp} / SL ${sl}  OK")
+                        print(f"  LARGO {qty} {s['ticker']} @~${precio:.2f} -> TP ${tp} / SL ${sl}"
+                              f"  (conv {s.get('conviccion', float('nan')):+.2f}, sent {sn:+.2f})  OK")
                     else:
                         print(f"  {s['ticker']}: {r}")
                 except Exception as e:
