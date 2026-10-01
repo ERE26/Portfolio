@@ -19,19 +19,25 @@ from patrones.intradia import rasgos_intradia, rvol
 # universo intradia liquido (las mismas grandes y ETFs que se usaron en el estudio)
 LIQUIDOS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVGO",
             "JPM", "BAC", "GS", "XOM", "CVX", "UNH", "LLY", "COST", "SPY", "QQQ", "XLE"]
-K_PT, K_SL = 1.5, 1.0            # objetivo/stop en ATR (intradia, R:R 1.5:1)
-RVOL_MIN = 1.1                   # 'stock in play': volumen por encima de lo normal
+
+# configuracion por temporalidad (de lo analizado en el estudio):
+#  - 1h: RVOL filtro, continuacion; R:R 1.5:1 en ATR.
+#  - 15m: mas ruidoso -> RVOL mas exigente; sin forzar cierre (el bracket decide).
+CONFIG = {
+    "1Hour": {"k_pt": 1.5, "k_sl": 1.0, "rvol_min": 1.1, "dias": 8},
+    "15Min": {"k_pt": 1.3, "k_sl": 0.9, "rvol_min": 1.3, "dias": 4},
+}
 
 
-def señales(tickers=LIQUIDOS, verbose=True):
+def señales(tickers=LIQUIDOS, intervalo="1Hour", verbose=True):
     """Señales intradia actuales: para cada ticker, VWAP/RVOL/sesion y si es
     candidato largo. Devuelve DataFrame ordenado por fuerza."""
-    desde = (pd.Timestamp.now() - pd.Timedelta(days=8)).strftime("%Y-%m-%d")
-    cli = alpaca.Cliente(ttl=300) if hasattr(alpaca, "Cliente") else None
+    cfg = CONFIG[intervalo]
+    desde = (pd.Timestamp.now() - pd.Timedelta(days=cfg["dias"])).strftime("%Y-%m-%d")
     filas = []
     for t in tickers:
         try:
-            df = alpaca.historico(t, "1Hour", desde=desde, max_paginas=4)
+            df = alpaca.historico(t, intervalo, desde=desde, max_paginas=6)
         except Exception as e:
             if verbose:
                 print(f"  {t}: sin datos ({str(e)[:40]})")
@@ -45,7 +51,7 @@ def señales(tickers=LIQUIDOS, verbose=True):
         atr_pct = atr / precio if precio else 0.0
         dist_vwap = float(r["intra_dist_vwap"].iloc[-1])
         ret_ses = float(r["intra_ret_sesion"].iloc[-1])
-        candidato = (dist_vwap > 0) and (ret_ses > 0) and (rv >= RVOL_MIN) and (atr_pct > 0.001)
+        candidato = (dist_vwap > 0) and (ret_ses > 0) and (rv >= cfg["rvol_min"]) and (atr_pct > 0.001)
         filas.append({"ticker": t, "precio": precio, "atr_pct": atr_pct,
                       "dist_vwap": dist_vwap, "rvol": rv, "ret_sesion": ret_ses,
                       "score": rv * max(ret_ses, 0), "candidato": candidato})
@@ -53,10 +59,11 @@ def señales(tickers=LIQUIDOS, verbose=True):
     return d.sort_values("score", ascending=False).reset_index(drop=True) if len(d) else d
 
 
-def plan_intradia(reserva, n_max=5, tickers=LIQUIDOS, verbose=True):
+def plan_intradia(reserva, intervalo="1Hour", n_max=5, tickers=LIQUIDOS, verbose=True):
     """Objetivo intradia: hasta n_max candidatos largos, repartiendo 'reserva' $,
     con precios de entrada/TP/SL. Devuelve (DataFrame de señales, lista de ordenes)."""
-    d = señales(tickers, verbose=verbose)
+    cfg = CONFIG[intervalo]
+    d = señales(tickers, intervalo=intervalo, verbose=verbose)
     if len(d) == 0:
         return d, []
     cand = d[d["candidato"]].head(n_max)
@@ -68,24 +75,24 @@ def plan_intradia(reserva, n_max=5, tickers=LIQUIDOS, verbose=True):
         qty = int(por_pos / s["precio"])
         if qty <= 0:
             continue
-        tp = s["precio"] * (1 + K_PT * s["atr_pct"])
-        sl = s["precio"] * (1 - K_SL * s["atr_pct"])
+        tp = s["precio"] * (1 + cfg["k_pt"] * s["atr_pct"])
+        sl = s["precio"] * (1 - cfg["k_sl"] * s["atr_pct"])
         ordenes.append({"ticker": s["ticker"], "qty": qty, "precio": s["precio"],
                         "tp": round(tp, 2), "sl": round(sl, 2),
                         "rvol": s["rvol"], "ret_sesion": s["ret_sesion"]})
     return d, ordenes
 
 
-def ejecutar(reserva=25000.0, enviar=False):
+def ejecutar(reserva=25000.0, intervalo="1Hour", enviar=False):
     cta = AT.cuenta()
-    print(f"Cuenta PAPER: equity ${float(cta['equity']):,.0f} | reserva intradia ${reserva:,.0f}")
+    print(f"Cuenta PAPER: equity ${float(cta['equity']):,.0f} | reserva {intervalo} ${reserva:,.0f}")
     import requests
     clock = requests.get("https://paper-api.alpaca.markets/v2/clock", headers=AT._headers(),
                          timeout=20).json()
     print(f"Mercado {'ABIERTO' if clock.get('is_open') else 'CERRADO (las ordenes quedan en cola)'}")
-    d, ordenes = plan_intradia(reserva)
+    d, ordenes = plan_intradia(reserva, intervalo=intervalo)
     if len(d):
-        print("\nSEÑALES INTRADIA (top por fuerza):")
+        print(f"\nSEÑALES {intervalo} (top por fuerza):")
         for _, s in d.head(8).iterrows():
             marca = "LARGO" if s["candidato"] else "  -  "
             print(f"  {marca} {s['ticker']:<6} VWAP {s['dist_vwap']*100:+5.2f}% | RVOL {s['rvol']:.2f} "
@@ -113,4 +120,9 @@ def ejecutar(reserva=25000.0, enviar=False):
 
 
 if __name__ == "__main__":
-    ejecutar(enviar="--enviar" in sys.argv)
+    iv = "15Min" if "--15m" in sys.argv else "1Hour"
+    rsv = 25000.0
+    for a in sys.argv:
+        if a.startswith("--reserva="):
+            rsv = float(a.split("=")[1])
+    ejecutar(reserva=rsv, intervalo=iv, enviar="--enviar" in sys.argv)
