@@ -349,6 +349,22 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_asignador_walk_forward():
+    """El asignador combina alfas con pesos que suman 1 cada mes, usando solo
+    historia (walk-forward), y produce métricas finitas."""
+    import numpy as np, pandas as pd
+    from patrones import asignador
+    rng = np.random.default_rng(0)
+    idx = pd.date_range("2000-01-31", periods=120, freq="ME")
+    a = pd.Series(rng.normal(0.010, 0.030, 120), index=idx)
+    b = pd.Series(rng.normal(0.008, 0.025, 120), index=idx)
+    serie, pesos = asignador.combinar({"a": a, "b": b}, metodo="inv_vol")
+    m = asignador.metricas(serie)
+    assert m and np.isfinite(m["sharpe"])
+    assert np.allclose(pesos.sum(axis=1).to_numpy(), 1.0, atol=1e-6)
+    assert len(serie) < len(a)                 # arranca tras min_obs (no mira el futuro)
+
+
 def test_pesos_unicidad_penaliza_solapamiento():
     """Casos cuyos horizontes se solapan (periodo denso) reciben MENOS peso que
     los aislados: es lo que evita sobre-representar periodos concurridos."""
