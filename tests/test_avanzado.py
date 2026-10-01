@@ -397,6 +397,28 @@ def test_pesos_unicidad_penaliza_solapamiento():
     assert abs(w.mean() - 1.0) < 1e-5          # normalizados a media 1
 
 
+def test_alpaca_trade_seguridad_y_plan(monkeypatch):
+    """El conector rechaza claves que no sean de paper (no 'PK') y el plan de
+    rebalanceo calcula las ordenes correctas para alcanzar el objetivo."""
+    import pytest
+    from fuentes import alpaca_trade as AT
+    # una clave real (empieza por AK) debe ser rechazada
+    monkeypatch.setenv("APCA_API_KEY_ID", "AK_falsa")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "secreto")
+    with pytest.raises(RuntimeError):
+        AT._claves()
+    # el endpoint esta bloqueado a paper
+    assert "paper-api" in AT._url("account")
+    # plan: objetivo 10 acc de AAA (precio 100) partiendo de 4 -> comprar 6
+    plan = AT and None
+    from operativa import plan_rebalanceo
+    ordenes = plan_rebalanceo({"AAA": 1000.0, "BBB": 500.0}, {"AAA": 100.0, "BBB": 50.0},
+                              {"AAA": {"qty": 4}})
+    por_t = {o["ticker"]: o for o in ordenes}
+    assert por_t["AAA"]["lado"] == "buy" and por_t["AAA"]["qty"] == 6   # 10 - 4
+    assert por_t["BBB"]["lado"] == "buy" and por_t["BBB"]["qty"] == 10  # 10 - 0
+
+
 def test_transversal_sin_lookahead_y_signo():
     """El momento transversal no mira al futuro y selecciona al alza al ticker que
     tendencia arriba frente al que tendencia abajo."""
