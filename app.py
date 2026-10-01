@@ -125,6 +125,11 @@ def analizar(intervalo, anos, largo, horizonte, paso, k, ticker, n_similares):
         return {"error": f"{ticker} no esta en el universo cargado."}
     vivo = mod_v.caso_vivo(precios, ctx, None, cfg, ticker)
     pred = mem.predecir(vivo, 0, excluir_ticker=ticker)
+    # evidencia: indicadores crudos del caso + voto de cada familia de indicadores
+    indicadores = leer_indicadores(vivo.feat[0], vivo.nombres_feat, intra=(intervalo != "1d"))
+    votos = [{"grupo": g, "label": GRUPO_ETQ.get(g, g), "prob": float(pr),
+              "peso": float(mem.pesos.get(g, 0.0))} for g, pr in pred.probs_grupo.items()]
+    votos.sort(key=lambda d: -d["peso"])
     vec = pred.vecinos.head(n_similares).copy()
     # forma del tramo actual y de cada vecino (para el dibujo de parecido)
     forma_obj = vivo.formas[0].tolist()
@@ -156,7 +161,7 @@ def analizar(intervalo, anos, largo, horizonte, paso, k, ticker, n_similares):
         "camino_p90": (np.asarray(pred.camino_p90) * atr * 100).tolist(),
         "pct_vecinos_suben": float((vec["ret"] > 0).mean()) if len(vec) else float("nan"),
         "n_vecinos": int(len(vec)), "vecinos": filas, "ohlc": ohlc,
-        "probs_grupo": {k_: float(v_) for k_, v_ in pred.probs_grupo.items()},
+        "indicadores": indicadores, "votos": votos,
     }
 
 
@@ -245,6 +250,46 @@ def mini_forma(forma, color):
     return fig
 
 
+TONO_COL = {"alza": VER, "baja": ROJO, "neutro": GRIS}
+
+
+def grafico_votos(r):
+    """Diverge alrededor del 50%: qué dice CADA familia de indicadores por su cuenta.
+
+    Es el 'por qué' cuantitativo: cada barra es lo que predeciría ese grupo con sus
+    propios vecinos; el ancho de la familia en el sistema es su peso."""
+    vs = [v for v in r["votos"] if v["peso"] > 0.005][:10]
+    if not vs:
+        return None
+    labels = [f"{v['label']}  ·  peso {v['peso']:.0%}" for v in vs]
+    x = [v["prob"] - 0.5 for v in vs]
+    cols = [VER if v["prob"] >= 0.5 else ROJO for v in vs]
+    txt = [f"{v['prob']:.0%} ↑" for v in vs]
+    fig = go.Figure(go.Bar(y=labels, x=x, orientation="h", marker_color=cols,
+                           text=txt, textposition="outside", cliponaxis=False))
+    fig.update_layout(height=max(230, 32 * len(vs) + 70), margin=dict(l=10, r=10, t=40, b=10),
+                      title="Voto por familia de indicadores", plot_bgcolor="white",
+                      yaxis=dict(autorange="reversed"))
+    fig.update_xaxes(range=[-0.55, 0.55], tickvals=[-0.5, -0.25, 0, 0.25, 0.5],
+                     ticktext=["baja", "", "50%", "", "sube"], zeroline=True,
+                     zerolinecolor=TINTA, zerolinewidth=1, gridcolor="#eef2f7")
+    return fig
+
+
+def ficha_tecnica_html(r):
+    """Rejilla de indicadores del caso actual con su lectura y color."""
+    celdas = []
+    for ind in r["indicadores"]:
+        c = TONO_COL.get(ind["tono"], GRIS)
+        celdas.append(
+            f"<div style='border:1px solid #e5e9f0;border-radius:8px;padding:7px 10px;background:#fff'>"
+            f"<div style='font-size:0.78em;color:{GRIS}'>{ind['label']}</div>"
+            f"<div style='font-size:1.1em;font-weight:700;color:{c}'>{ind['valor']}</div>"
+            f"<div style='font-size:0.76em;color:{c}'>{ind['lectura']}</div></div>")
+    return ("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));"
+            "gap:8px'>" + "".join(celdas) + "</div>")
+
+
 def vista_detalle(r, horizonte):
     st.subheader(f"{r['ticker']}  ·  {r['fecha'][:10]}")
     st.caption(f"Figura detectada: **{r['figura']}**")
@@ -252,6 +297,18 @@ def vista_detalle(r, horizonte):
     g1, g2 = st.columns([1.1, 1])
     g1.plotly_chart(grafico_velas_proyeccion(r, horizonte), use_container_width=True)
     g2.plotly_chart(grafico_parecido(r), use_container_width=True)
+
+    st.markdown("#### ¿Por qué esta predicción? — la evidencia")
+    v1, v2 = st.columns([1, 1.15])
+    fig_v = grafico_votos(r)
+    if fig_v is not None:
+        v1.plotly_chart(fig_v, use_container_width=True)
+    else:
+        v1.info("No hay voto por familia para este caso.")
+    with v2:
+        st.caption("Ficha técnica — indicadores del tramo actual")
+        st.markdown(ficha_tecnica_html(r), unsafe_allow_html=True)
+
     st.markdown(f"**Patrones más parecidos** ({r['n_vecinos']}) — de los más parecidos, "
                 f"subieron el **{r['pct_vecinos_suben']:.0%}**:")
     for v in r["vecinos"]:
@@ -287,6 +344,101 @@ def tabla_comparativa(resultados):
         return None
     df = pd.DataFrame(filas).sort_values("Confianza", ascending=False).reset_index(drop=True)
     return df
+
+
+# etiquetas legibles de cada familia de indicadores (para el "por que")
+GRUPO_ETQ = {
+    "forma": "Forma del gráfico", "forma_volumen": "Forma del volumen",
+    "tf_semanal": "Gráfico semanal", "tf_mensual": "Gráfico mensual",
+    "osciladores": "Osciladores (RSI/MACD)", "momento": "Momento / tendencia",
+    "volumen": "Volumen", "volatilidad": "Volatilidad", "contexto": "Contexto de mercado",
+    "noticias": "Noticias", "fundamentales": "Fundamentales", "macro": "Macro",
+    "institucional": "Institucional (13F)", "factores": "Factores (value/quality)",
+    "intradia": "Intradía (VWAP/RVOL)",
+}
+
+
+def leer_indicadores(feat, nombres, intra):
+    """Convierte el vector de indicadores del caso actual en lecturas legibles.
+
+    Devuelve lista de dicts {label, valor, lectura, tono} donde tono in
+    {alza, baja, neutro} para colorear. Es la EVIDENCIA cruda tras la prediccion.
+    """
+    def v(n):
+        return float(feat[nombres.index(n)]) if n in nombres else None
+    out = []
+
+    def add(label, valor_txt, lectura, tono):
+        out.append({"label": label, "valor": valor_txt, "lectura": lectura, "tono": tono})
+
+    rsi = v("rsi14")
+    if rsi is not None:
+        t = "baja" if rsi > 70 else ("alza" if rsi < 30 else "neutro")
+        lec = "sobrecompra" if rsi > 70 else ("sobreventa" if rsi < 30 else "neutral")
+        add("RSI(14)", f"{rsi:.0f}", lec, t)
+    rsi2 = v("rsi2")
+    if rsi2 is not None:
+        t = "baja" if rsi2 > 90 else ("alza" if rsi2 < 10 else "neutro")
+        add("RSI(2) corto plazo", f"{rsi2:.0f}",
+            "muy sobrecomprado" if rsi2 > 90 else ("muy sobrevendido" if rsi2 < 10 else "neutral"), t)
+    mh = v("macd_hist_atr")
+    if mh is not None:
+        add("MACD (histograma)", f"{mh:+.2f}",
+            "momento alcista" if mh > 0 else "momento bajista", "alza" if mh > 0 else "baja")
+    adx = v("adx14")
+    if adx is not None:
+        add("ADX(14)", f"{adx:.0f}",
+            "tendencia fuerte" if adx > 25 else ("sin tendencia" if adx < 20 else "tendencia débil"),
+            "neutro")
+    p50 = v("pos_sma50")
+    if p50 is not None:
+        add("vs. media 50", f"{p50*100:+.1f}%",
+            "por encima" if p50 > 0 else "por debajo", "alza" if p50 > 0 else "baja")
+    p200 = v("pos_sma200")
+    if p200 is not None:
+        add("vs. media 200", f"{p200*100:+.1f}%",
+            "tendencia de fondo alcista" if p200 > 0 else "tendencia de fondo bajista",
+            "alza" if p200 > 0 else "baja")
+    mom = v("mom_12_1")
+    if mom is not None:
+        add("Momento 12-1", f"{mom*100:+.1f}%",
+            "momento positivo" if mom > 0 else "momento negativo", "alza" if mom > 0 else "baja")
+    bb = v("boll_b20")
+    if bb is not None:
+        t = "baja" if bb > 1 else ("alza" if bb < 0 else "neutro")
+        lec = "sobre banda superior" if bb > 1 else ("bajo banda inferior" if bb < 0 else "dentro de bandas")
+        add("Bollinger %b", f"{bb:.2f}", lec, t)
+    atr = v("atr_pct")
+    if atr is not None:
+        add("Volatilidad (ATR)", f"{atr*100:.2f}%", "del precio por vela", "neutro")
+    zv = v("z_volumen20")
+    if zv is not None and abs(zv) > 1e-6:
+        add("Volumen (z-score)", f"{zv:+.1f}",
+            "volumen alto" if zv > 1 else ("volumen bajo" if zv < -1 else "normal"), "neutro")
+    reg = v("mkt_sobre_sma200")
+    if reg is not None:
+        add("Régimen de mercado", "alcista" if reg > 0 else "bajista",
+            "el índice sobre su media 200" if reg > 0 else "el índice bajo su media 200",
+            "alza" if reg > 0 else "baja")
+    fr = v("fuerza_rel_indice_60")
+    if fr is not None and abs(fr) > 1e-6:
+        add("Fuerza relativa (índice)", f"{fr*100:+.1f}%",
+            "más fuerte que el mercado" if fr > 0 else "más débil que el mercado",
+            "alza" if fr > 0 else "baja")
+    if intra:
+        dv = v("intra_dist_vwap")
+        if dv is not None and abs(dv) > 1e-9:
+            add("Distancia al VWAP", f"{dv*100:+.2f}%",
+                "sobre el VWAP de la sesión" if dv > 0 else "bajo el VWAP de la sesión",
+                "alza" if dv > 0 else "baja")
+        rv = v("intra_rvol")
+        if rv is not None and abs(rv) > 1e-9:
+            import math
+            rvol = math.exp(rv)
+            add("RVOL (volumen relativo)", f"{rvol:.2f}×",
+                "volumen anormal (stock in play)" if rvol > 1.2 else "volumen normal",
+                "alza" if rvol > 1.2 else "neutro")
+    return out
 
 
 # ======================================================================== app
