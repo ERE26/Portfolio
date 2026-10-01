@@ -316,6 +316,24 @@ def cmd_buscar(args):
     print("\n  (Herramienta de estudio; no es recomendacion de inversion.)")
 
 
+def cmd_descargar_intraday(args):
+    """Descarga barras intradia de Alpaca (feed IEX gratuito, historico desde ~2020)."""
+    from fuentes import alpaca
+    from fuentes.universo import ACCIONES, FONDOS
+    tickers = args.tickers
+    if not tickers:
+        liquidos = (ACCIONES["tecnologia"] + ACCIONES["financiero"] + ACCIONES["energia"][:4]
+                    + ACCIONES["salud"][:4] + ACCIONES["consumo_discrecional"][:4]
+                    + FONDOS["etf_indice"][:4] + FONDOS["etf_sectorial"][:3])
+        tickers = sorted(set(liquidos))
+    print(f"Descargando {len(tickers)} tickers en {args.intervalo} desde Alpaca (IEX)...")
+    print("(requiere claves en datos/.alpaca_key o APCA_API_KEY_ID/APCA_API_SECRET_KEY)")
+    inf = alpaca.descargar_universo(tickers, args.intervalo, args.desde, verbose=True)
+    ok = [x for x in inf if isinstance(x[1], int)]
+    print(f"\nDescargados: {len(ok)} con datos | {sum(x[1] for x in ok):,} barras")
+    print("Guardado en datos/intraday/. Para evaluar: construye el banco con esos CSV.")
+
+
 def cmd_fondos(args):
     """Inteligencia de los grandes inversores de conviccion a partir de sus 13F."""
     from fuentes import form13f
@@ -483,6 +501,14 @@ def main(argv=None):
     pb.add_argument("--mercado", default="datos/mercado",
                     help="carpeta de CSV descargados (si se usa --fuente mercado)")
     pb.set_defaults(func=cmd_buscar)
+
+    pdi = sub.add_parser("descargar-intraday",
+                         help="descarga barras intradia de Alpaca (feed IEX, ~5 años)")
+    pdi.add_argument("--intervalo", default="1Hour", help="1Hour, 15Min, 5Min")
+    pdi.add_argument("--desde", default="2020-08-01")
+    pdi.add_argument("--tickers", type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+                     default=None, help="por defecto, los valores liquidos del universo")
+    pdi.set_defaults(func=cmd_descargar_intraday)
 
     pf = sub.add_parser("fondos",
                         help="dossier de los grandes fondos: consenso y movimientos (13F)")

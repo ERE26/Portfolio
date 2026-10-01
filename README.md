@@ -440,13 +440,50 @@ Se probó el sistema completo en temporalidad horaria (1h, 2 años de histórico
 | **Diario** (10 años) | 52.5% | **1.84** | **2.17** |
 | 1 hora (2 años) | 48.9% | −0.47 | 0.82 |
 
-**El edge es específico de la temporalidad diaria.** En 1h el sistema pierde. Tiene
-lógica: los factores fundamentales (value, quality) no cambian intradía, el ruido
-de microestructura domina sobre la señal, y el patrón de forma de 40 barras captura
-un fenómeno de medio plazo (semanas), no de horas. En 15 min, Yahoo solo ofrece ~3
-meses de histórico, insuficiente para una validación walk-forward robusta (haría
-falta un proveedor de datos intradía de pago). Es un resultado negativo pero
-valioso: delimita *dónde* vive la ventaja del sistema.
+Con los datos de Yahoo (2 años de 1h) **el edge parecía específico del diario**:
+en 1h el sistema perdía (Sharpe −0.47). Pero eso resultó ser en parte un problema
+de **datos y diseño**, no solo de régimen — ver la sección siguiente.
+
+## Rescatando el intradía: datos de calidad + indicadores propios
+
+El intradía es un régimen distinto, y abordarlo bien requirió tres cosas (todas
+documentadas en la teoría, `fuentes/alpaca.py` + `patrones/intradia.py`):
+
+1. **Más histórico, de otra fuente.** Yahoo da 2 años de 1h; **Alpaca** (feed IEX,
+   gratis) da **~5 años**. Con el triple de datos el walk-forward es robusto.
+2. **Indicadores específicos de intradía** que no existen en diario: VWAP de la
+   sesión y distancia a él, posición en el rango del día, hora codificada
+   cíclicamente (estacionalidad en U), volumen relativo (**RVOL**), gap de
+   apertura. Más el estimador de **costes Corwin-Schultz** (spread real solo con
+   máximos y mínimos — en intradía el coste decide la rentabilidad).
+3. **Horizonte adecuado** (6 barras ≈ una sesión en vez de 10).
+
+Resultado:
+
+![Intradía rescatado](figuras/18_intradia_rescatado.png)
+
+| Configuración 1h | Sharpe | Profit Factor | Pliegues |
+|---|---|---|---|
+| Yahoo (2 años, sin indic. intradía) | −0.47 | 0.82 | 1/4 |
+| **Alpaca (5 años + indic. intradía)** | **+1.21** | **1.69** | **4/4** |
+
+El sistema pasa de perder a **Sharpe +1.21, Profit Factor 1.69, rentable en los 4
+pliegues** (y aguanta +1.08 al doblar el coste). Un matiz interesante contra la
+intuición: probamos operar **reversión** (invertir la señal, porque la teoría dice
+que a muy corto plazo domina la reversión a la media) y dio *peor* (Sharpe 0.92); a
+escala de ~1 sesión manda la **continuación del día** (el "intraday momentum" de
+Gao et al.), no la reversión de minutos. El edge intradía es real pero menor y
+menos estable que el diario (Sharpe 1.2 vs 1.84), como corresponde a un régimen con
+más ruido y costes.
+
+```bash
+python bot.py descargar-intraday --intervalo 1Hour   # requiere claves de Alpaca (gratis)
+```
+
+**Fuentes de datos intradía** (por si quieres más profundidad): Alpaca (gratis,
+IEX, ~5 años), Twelve Data y Alpha Vantage (gratis con límites), Polygon y
+Databento (de pago, tick data profesional). Para 15 min con años de histórico hace
+falta una de pago.
 
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
@@ -543,6 +580,7 @@ patrones/
   rentabilidad.py        barreras asimétricas, edge por segmento, reglas del sistema
   factores.py            normalización cross-sectional de factores (estilo AQR)
   primario.py            modelos primarios: memoria, gradient boosting y ensamble
+  intradia.py            indicadores intradia (VWAP, RVOL, hora, Corwin-Schultz)
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
@@ -559,7 +597,7 @@ fuentes/
   fred.py                FRED: macro de régimen (VIX, curva, crédito)
   form13f.py             smart money: posiciones de los grandes fondos (13F)
   enriquecer.py          combina SEC + FRED + 13F + factores como features
-tests/                   52 tests; el grueso vigila que no se cuele información del futuro
+tests/                   55 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 
