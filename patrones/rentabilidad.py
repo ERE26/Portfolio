@@ -153,16 +153,34 @@ REGLAS_SISTEMA = {
 }
 
 
+def _coste_vector(d, coste_atr):
+    """Resuelve el coste por operacion (en ATR). Admite:
+      - un float: coste PLANO (comportamiento por defecto, retrocompatible);
+      - "realista": coste por fila desde patrones.costes (spread+comision escalan
+        inverso a la volatilidad; ver docs/aprendizaje_quant.md);
+      - un callable f(d)->array: coste a medida por fila."""
+    if isinstance(coste_atr, str) and coste_atr == "realista":
+        from .costes import coste_por_fila
+        return coste_por_fila(d)
+    if callable(coste_atr):
+        return np.asarray(coste_atr(d), float)
+    return float(coste_atr)
+
+
 def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
     """Aplica las reglas de operativa a las senales y devuelve (operadas, metricas).
 
     Decide que operar con filtros defendibles a priori y mide el resultado por
     operacion (en ATR) y por pliegue, para comprobar que es estable en el tiempo.
+
+    coste_atr: float (coste plano, por defecto 0.05) o "realista" (coste por fila
+    que escala inverso a la volatilidad; mas honesto, ver patrones.costes).
     """
     r = {**REGLAS_SISTEMA, **(reglas or {})}
     d = res.copy()
     if invertir:                    # reversion: operar lo contrario de la senal
         d["lado"] = -d["lado"]
+    cv = _coste_vector(d, coste_atr)      # coste en ATR: escalar o array alineado a d
     # salida al cierre (EOD): el horizonte de cada operacion se recorta al final
     # de la sesion. Requiere la columna 'barras_hasta_cierre' (banco intradia).
     cap = d["barras_hasta_cierre"].to_numpy() if (
@@ -173,9 +191,9 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
         n = len(d)
         rets = [etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=np.full(n, c))
                 for c in r["caps_horizonte"]]
-        d["ret_op"] = np.mean(rets, axis=0) - coste_atr
+        d["ret_op"] = np.mean(rets, axis=0) - cv
     else:
-        d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=cap) - coste_atr
+        d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=cap) - cv
     vol = pd.Series([np.max(h) - np.min(l) for h, l in zip(d["cam_high"], d["cam_low"])],
                     index=d.index)
     vol_alta = pd.qcut(vol.rank(method="first"), 3, labels=["baja", "media", "alta"]) != "baja"

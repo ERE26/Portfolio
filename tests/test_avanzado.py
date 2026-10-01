@@ -646,3 +646,64 @@ def test_rankear_conviccion_excluir_y_vacio(monkeypatch):
     r = G.rankear_conviccion(opo, umbral_fuerte=1.5, excluir={"AAA"})
     assert len(r) == 0                   # AAA excluida, BBB no es fuerte
     assert len(G.rankear_conviccion(pd.DataFrame(), 1.5)) == 0
+
+
+def test_costes_escala_inversa_con_volatilidad():
+    """La propiedad clave: en unidades de ATR, el coste escala INVERSAMENTE con la
+    volatilidad. Un valor de baja atr_pct cuesta mas (en riesgo) que uno alto."""
+    import numpy as np
+    from patrones import costes
+    c_bajo = costes.coste_atr(0.008, precio=100.0, slippage_atr=0.0)   # atr_pct 0.8%
+    c_alto = costes.coste_atr(0.020, precio=100.0, slippage_atr=0.0)   # atr_pct 2.0%
+    assert c_bajo > c_alto                      # baja vol -> mas coste en ATR
+    assert c_bajo / c_alto == pytest_approx(0.020 / 0.008, rel=1e-6)   # exactamente inverso
+    # el suelo evita explotar en atr_pct minusculos
+    assert np.isfinite(costes.coste_atr(0.0, precio=100.0))
+    # slippage_atr se suma tal cual (ya esta en ATR)
+    base = costes.coste_atr(0.02, precio=100.0, slippage_atr=0.0)
+    assert costes.coste_atr(0.02, precio=100.0, slippage_atr=0.05) == pytest_approx(base + 0.05)
+
+
+def test_costes_por_fila_fallback_plano():
+    """coste_por_fila usa atr_pct por fila; sin columna de volatilidad cae al plano."""
+    import numpy as np, pandas as pd
+    from patrones import costes
+    df = pd.DataFrame({"atr_pct": [0.01, 0.02], "precio": [50.0, 200.0]})
+    c = costes.coste_por_fila(df)
+    assert len(c) == 2 and (c > 0).all()
+    assert c[0] > c[1]                           # 1% atr cuesta mas que 2% atr
+    sin = costes.coste_por_fila(pd.DataFrame({"x": [1, 2, 3]}), defecto_plano=0.05)
+    assert list(sin) == [0.05, 0.05, 0.05]
+
+
+def pytest_approx(*a, **k):
+    import pytest
+    return pytest.approx(*a, **k)
+
+
+def test_aplicar_sistema_coste_realista():
+    """coste_atr='realista' usa coste por fila (escala con volatilidad) y no rompe
+    el pipeline: devuelve metricas y penaliza mas la baja volatilidad que el plano."""
+    import numpy as np, pandas as pd
+    from patrones import rentabilidad
+    rng = np.random.default_rng(3)
+    n = 400
+    res = pd.DataFrame({
+        "lado": np.ones(n), "prob_meta": rng.uniform(0.5, 0.85, n),
+        "pliegue": 1, "mkt_alcista": 1.0,
+        "atr_pct": rng.uniform(0.006, 0.03, n),       # volatilidad variada
+        "cam_high": [rng.uniform(0, 3, 8) for _ in range(n)],
+        "cam_low": [rng.uniform(-3, 0, 8) for _ in range(n)],
+        "cam_close": [rng.uniform(-2, 2, 8) for _ in range(n)],
+    })
+    reglas = {"permitir_cortos": False, "solo_mercado_alcista": False,
+              "evitar_vol_baja": False}
+    sel_p, met_p = rentabilidad.aplicar_sistema(res, reglas=reglas, coste_atr=0.05)
+    sel_r, met_r = rentabilidad.aplicar_sistema(res, reglas=reglas, coste_atr="realista")
+    assert met_r.get("operaciones", 0) > 0
+    # el coste realista da un retorno medio distinto del plano (no es la misma resta)
+    assert met_p["ret_medio_atr"] != met_r["ret_medio_atr"]
+    # callable tambien admitido: coste cero -> retorno >= que con coste plano
+    sel_0, met_0 = rentabilidad.aplicar_sistema(
+        res, reglas=reglas, coste_atr=lambda d: np.zeros(len(d)))
+    assert met_0["ret_medio_atr"] >= met_p["ret_medio_atr"] - 1e-9

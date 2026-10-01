@@ -74,6 +74,12 @@ cuánto, y no operar casi nada el resto del tiempo.
   (RVOL, dist_vwap, ret_sesión, ATR, sentimiento, hora) y su desenlace; con ≥25
   ops se estima el umbral de RVOL que maximiza el acierto y se aplica.
 - Robustez (`patrones/robustez.py`): DSR + PBO (CSCV) para no auto-engañarse.
+- Costes realistas (`patrones/costes.py`): el coste en riesgo (ATR) escala inverso
+  a la volatilidad; integrado en el backtest con `aplicar_sistema(coste_atr=
+  "realista")`. Diagnóstico empírico en `docs/analisis_costes_intradia.md`
+  (figura 26): en blue chips el edge 15m no sobrevive a costes salvo por
+  CONFLUENCIA (RVOL alto **y** meta alto) — el edge está en los *stocks in play*,
+  no en las large-caps.
 
 Referencias: Zarattini-Barbon-Aziz (2024, SSRN 4729284 y 4416622); López de
 Prado, *Advances in Financial Machine Learning* (2018); Bernard & Thomas
