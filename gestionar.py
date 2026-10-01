@@ -29,21 +29,36 @@ UNIVERSO = sorted(set(LIQUIDOS + [
 
 
 def señal(ticker, intervalo="15Min"):
+    """Re-analiza un ticker con las velas nuevas. Devuelve indicadores actuales Y
+    señales de TENDENCIA (sostenidas), para distinguir una reversion real de una
+    bajada organica puntual."""
     cfg = CONFIG[intervalo]
     desde = (pd.Timestamp.now() - pd.Timedelta(days=cfg["dias"])).strftime("%Y-%m-%d")
     df = alpaca.historico(ticker, intervalo, desde=desde, max_paginas=6)
     if len(df) < 20:
         raise RuntimeError("pocos datos")
     r = rasgos_intradia(df)
-    precio = float(df["close"].iloc[-1])
+    c = df["close"]
+    dv = r["intra_dist_vwap"]
+    precio = float(c.iloc[-1])
     atr = float(ind.atr(df["high"], df["low"], df["close"], 14).iloc[-1])
-    return {"precio": precio, "dist_vwap": float(r["intra_dist_vwap"].iloc[-1]),
+    # pendiente corta: regresion lineal de los ultimos 5 cierres (log)
+    y = np.log(c.iloc[-5:].to_numpy()); x = np.arange(len(y))
+    pend = float(np.polyfit(x, y, 1)[0]) if len(y) >= 3 else 0.0
+    bajo_vwap = float((dv.iloc[-4:] < 0).mean())      # fraccion de las ultimas 4 bajo VWAP
+    return {"precio": precio, "dist_vwap": float(dv.iloc[-1]),
             "rvol": float(rvol(df).iloc[-1]), "ret_sesion": float(r["intra_ret_sesion"].iloc[-1]),
-            "atr_pct": atr / precio if precio else 0.0}
+            "atr_pct": atr / precio if precio else 0.0, "pend": pend, "bajo_vwap": bajo_vwap}
 
 
 def revisar_intradia():
-    """Decide mantener o cerrar cada posicion intradia (la que tiene bracket)."""
+    """Re-analiza cada posicion intradia con las velas nuevas y decide si la
+    tendencia ha cambiado DE VERDAD (cerrar) o es una bajada organica (mantener).
+
+    Cerrar solo si se CONFIRMA reversion: (a) sostenida por debajo del VWAP (3+ de
+    las ultimas 4 barras), (b) pendiente corta negativa y (c) claramente por debajo
+    del VWAP (>0.3%). Una sola barra roja o un roce del VWAP NO cierra: para eso
+    esta el stop-loss del bracket, que protege de una caida real."""
     ordenes = AT.ordenes_abiertas()
     simbolos = sorted(set(o["symbol"] for o in ordenes))
     pos = AT.posiciones()
@@ -55,10 +70,16 @@ def revisar_intradia():
             s = señal(t, "15Min")
         except Exception:
             continue
-        # cortar si se gira: por debajo del VWAP o sesion ya negativa
-        cerrar = (s["dist_vwap"] < -0.0015) or (s["ret_sesion"] < -0.001)
-        out.append({"ticker": t, "pl": pos[t]["pl"], "cerrar": cerrar,
-                    "dist_vwap": s["dist_vwap"], "ret_sesion": s["ret_sesion"], "rvol": s["rvol"]})
+        reversion = (s["bajo_vwap"] >= 0.75) and (s["pend"] < 0) and (s["dist_vwap"] < -0.003)
+        if reversion:
+            motivo = "REVERSION confirmada (sostenida bajo VWAP + pendiente baja)"
+        elif s["dist_vwap"] < 0 or s["ret_sesion"] < 0:
+            motivo = "bajada organica (se mantiene; SL del bracket protege)"
+        else:
+            motivo = "tendencia intacta"
+        out.append({"ticker": t, "pl": pos[t]["pl"], "cerrar": reversion, "motivo": motivo,
+                    "dist_vwap": s["dist_vwap"], "ret_sesion": s["ret_sesion"],
+                    "rvol": s["rvol"], "pend": s["pend"], "bajo_vwap": s["bajo_vwap"]})
     return out
 
 
@@ -96,13 +117,13 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     print(f"Posiciones intradia (bracket): {len(rev)}")
     a_cerrar = []
     for d in rev:
-        estado = "CERRAR (se gira)" if d["cerrar"] else "mantener"
         print(f"  {d['ticker']:<6} PL ${d['pl']:+.0f} | VWAP {d['dist_vwap']*100:+.2f}% "
-              f"sesion {d['ret_sesion']*100:+.2f}% RVOL {d['rvol']:.2f} -> {estado}")
+              f"sesion {d['ret_sesion']*100:+.2f}% pend {d['pend']*100:+.3f}% "
+              f"bajoVWAP {d['bajo_vwap']*100:.0f}% -> {d['motivo']}")
         if d["cerrar"]:
             a_cerrar.append(d["ticker"])
     if a_cerrar and gestionar:
-        print(f"Cerrando {a_cerrar} para cortar perdidas...")
+        print(f"Cerrando {a_cerrar} (reversion confirmada)...")
         print(" ", AT.cerrar_posiciones(a_cerrar, confirmar=True))
     elif a_cerrar:
         print(f"[dry-run] cerraria: {a_cerrar}")
