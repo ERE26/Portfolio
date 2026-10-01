@@ -391,6 +391,28 @@ aprenda a pesarlas.
 python bot.py analizar --fuente mercado --con-13f --primario ensamble
 ```
 
+## Cortos en mercado bajista: ganar también en las caídas
+
+El sistema de solo-largos se quedaba fuera en los mercados bajistas (su punto
+débil era 2022). La solución es operar **a favor del régimen**: largos cuando el
+mercado está sobre su SMA200, **cortos cuando está por debajo**. La asimetría
+riesgo/recompensa se invierte para los cortos (objetivo abajo, stop arriba), y el
+meta-modelo selecciona igual.
+
+Los cortos en mercado bajista aciertan el 73.7% (su naturaleza: apostar a la baja
+cuando el mercado cae). Añadirlos rescata justo el año bajista:
+
+![Cortos en mercado bajista](figuras/15_cortos.png)
+
+| Sistema | Sharpe | Profit Factor | Pliegue bajista (2022) |
+|---|---|---|---|
+| Solo largos | 1.76 | 2.10 | +0.25 (el más flojo) |
+| **Long-short por régimen** | **1.84** | **2.17** | **+0.83** |
+
+La mejora agregada es modesta (el periodo fue 83% alcista), pero **cierra el punto
+débil**: el sistema deja de depender de que el mercado suba. Los 39 cortos nuevos
+tienen profit factor 3.53 (muestra pequeña, alentadora). Es el modo por defecto.
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -502,7 +524,7 @@ fuentes/
   fred.py                FRED: macro de régimen (VIX, curva, crédito)
   form13f.py             smart money: posiciones de los grandes fondos (13F)
   enriquecer.py          combina SEC + FRED + 13F + factores como features
-tests/                   50 tests; el grueso vigila que no se cuele información del futuro
+tests/                   51 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

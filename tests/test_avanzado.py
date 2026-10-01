@@ -238,3 +238,23 @@ def test_ensamble_expone_prob_gbm():
     p = m.predecir(te, 5)
     assert np.isfinite(p.prob_gbm)
     assert len(p.vecinos) > 0   # mantiene los vecinos de la memoria
+
+
+# ------------------------------------------------- cortos / long-short
+def test_cortos_en_bajista():
+    """En modo long-short, se toman cortos en mercado bajista y largos en alcista."""
+    import numpy as np, pandas as pd
+    from patrones.rentabilidad import aplicar_sistema
+    # señales sinteticas: mezcla de regimenes y lados, con recorridos
+    n = 200
+    rng = np.random.default_rng(0)
+    H = 10
+    cam = rng.normal(0, 1, (n, H)).cumsum(1)
+    df = pd.DataFrame({
+        "lado": rng.choice([-1, 1], n), "prob_meta": rng.uniform(0.5, 0.8, n),
+        "mkt_alcista": rng.choice([0.0, 1.0], n), "pliegue": rng.integers(1, 5, n),
+        "cam_high": list(cam + 2), "cam_low": list(cam - 2), "cam_close": list(cam),
+        "acierto_primario": rng.integers(0, 2, n)})
+    sel, m = aplicar_sistema(df, reglas={"permitir_cortos": True, "evitar_vol_baja": False})
+    # todas las operadas respetan: largo en alcista, corto en bajista
+    assert ((sel["mkt_alcista"] > 0.5) == (sel["lado"] > 0)).all()

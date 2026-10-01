@@ -122,6 +122,7 @@ def edge_por_segmento(res, k_pt=2.5, k_sl=1.0, coste_atr=0.05, min_n=40):
 REGLAS_SISTEMA = {
     "k_pt": 3.0, "k_sl": 1.5, "umbral_meta": 0.55,
     "solo_largos": True, "evitar_vol_baja": True, "solo_mercado_alcista": True,
+    "permitir_cortos": True,    # largos si el mercado sube, cortos si cae (robusto en ambos)
 }
 
 
@@ -139,12 +140,17 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05):
     vol_alta = pd.qcut(vol.rank(method="first"), 3, labels=["baja", "media", "alta"]) != "baja"
 
     m = d["prob_meta"] >= r["umbral_meta"]
-    if r["solo_largos"]:
-        m &= d["lado"] > 0
     if r["evitar_vol_baja"]:
         m &= vol_alta
-    if r["solo_mercado_alcista"] and "mkt_alcista" in d:
-        m &= d["mkt_alcista"] > 0.5
+    if r.get("permitir_cortos") and "mkt_alcista" in d:
+        # a favor del regimen: largos cuando el mercado sube, cortos cuando cae.
+        alcista = d["mkt_alcista"] > 0.5
+        m &= ((alcista & (d["lado"] > 0)) | (~alcista & (d["lado"] < 0)))
+    else:
+        if r["solo_largos"]:
+            m &= d["lado"] > 0
+        if r["solo_mercado_alcista"] and "mkt_alcista" in d:
+            m &= d["mkt_alcista"] > 0.5
     sel = d[m]
     if len(sel) < 20:
         return sel, {"operaciones": len(sel)}
