@@ -61,18 +61,104 @@ def _serie_concepto(facts, conceptos, forms=("10-Q", "10-K")):
     return df.sort_values("end").reset_index(drop=True)
 
 
+def _serie_puntual(facts, conceptos, forms=("10-Q", "10-K")):
+    """Serie de una magnitud de BALANCE (puntual, no de periodo): activos,
+    patrimonio... Se identifica por tener 'instant' (sin 'start'/'end' de duracion)."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    filas = []
+    for c in conceptos:
+        if c not in gaap:
+            continue
+        for unidad, registros in gaap[c]["units"].items():
+            for r in registros:
+                if r.get("form") in forms and r.get("end") and r.get("filed") and not r.get("start"):
+                    filas.append({"end": pd.Timestamp(r["end"]), "val": r["val"],
+                                  "filed": pd.Timestamp(r["filed"])})
+    if len(filas) < 4:
+        return pd.DataFrame(columns=["end", "val", "filed"])
+    df = pd.DataFrame(filas).sort_values("filed").drop_duplicates("end", keep="first")
+    return df.sort_values("end").reset_index(drop=True)
+
+
 def fundamentales(ticker, cik=None, cliente=None):
-    """Serie trimestral de ingresos y BPA con fecha de publicacion."""
+    """Series trimestrales de las magnitudes fundamentales con fecha de publicacion."""
     cli = _cliente(cliente)
     if cik is None:
         cik = mapa_cik(cli).get(ticker)
     if cik is None:
         raise RuntimeError(f"{ticker}: sin CIK en SEC")
     facts = cli.get_json(f"{BASE}/api/xbrl/companyfacts/CIK{cik}.json")
-    ingresos = _serie_concepto(facts, ["RevenueFromContractWithCustomerExcludingAssessedTax",
-                                       "Revenues", "SalesRevenueNet"])
-    bpa = _serie_concepto(facts, ["EarningsPerShareDiluted", "EarningsPerShareBasic"])
-    return {"ingresos": ingresos, "bpa": bpa}
+    return {
+        "ingresos": _serie_concepto(facts, ["RevenueFromContractWithCustomerExcludingAssessedTax",
+                                            "Revenues", "SalesRevenueNet"]),
+        "bpa": _serie_concepto(facts, ["EarningsPerShareDiluted", "EarningsPerShareBasic"]),
+        "beneficio": _serie_concepto(facts, ["NetIncomeLoss", "ProfitLoss"]),
+        "acciones": _serie_concepto(facts, ["WeightedAverageNumberOfDilutedSharesOutstanding",
+                                            "WeightedAverageNumberOfSharesOutstandingBasic"]),
+        "patrimonio": _serie_puntual(facts, ["StockholdersEquity",
+            "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"]),
+        "activos": _serie_puntual(facts, ["Assets"]),
+    }
+
+
+def _ttm(serie):
+    """Suma movil de 4 trimestres (trailing-twelve-months) para magnitudes de flujo."""
+    s = serie.copy()
+    s["ttm"] = s["val"].rolling(4, min_periods=4).sum()
+    return s.dropna(subset=["ttm"])
+
+
+def factores_valor_calidad(ticker, fechas, precio, cik=None, cliente=None):
+    """Factores VALUE, QUALITY y SIZE point-in-time (crudos, sin normalizar).
+
+    Siguen las definiciones de Fama-French y AQR (Quality-Minus-Junk), con lo que
+    los datos de SEC permiten: E/P y S/P (value), margen neto, ROE y variabilidad
+    de beneficios (quality), y market cap (size). Todo con TTM y fecha 'filed'
+    para no mirar al futuro. La normalizacion cross-sectional se hace despues,
+    comparando todas las acciones en cada fecha (ver patrones.factores).
+    """
+    cols = ["fac_earnings_yield", "fac_sales_price", "fac_margen_neto", "fac_roe",
+            "fac_estab_beneficio", "fac_size"]
+    idx = pd.DatetimeIndex(fechas)
+    vacio = pd.DataFrame({c: np.nan for c in cols}, index=idx)
+    try:
+        f = fundamentales(ticker, cik, cliente)
+    except Exception:
+        return vacio
+    if len(f["bpa"]) < 6:
+        return vacio
+
+    bpa_ttm = _ttm(f["bpa"])
+    ing_ttm = _ttm(f["ingresos"]) if len(f["ingresos"]) >= 4 else None
+    ben_ttm = _ttm(f["beneficio"]) if len(f["beneficio"]) >= 4 else None
+    acc = f["acciones"]
+    pat, act = f["patrimonio"], f["activos"]
+    precio = pd.Series(precio).reindex(idx).ffill()
+
+    def ultimo(serie, fecha, col="ttm"):
+        pub = serie[serie["filed"] < fecha]
+        return pub.iloc[-1][col] if len(pub) else np.nan
+
+    filas = []
+    for fch in idx:
+        px = precio.get(fch, np.nan)
+        eps = ultimo(bpa_ttm, fch)
+        ey = eps / px if (np.isfinite(eps) and np.isfinite(px) and px > 0) else np.nan
+        ni = ultimo(ben_ttm, fch) if ben_ttm is not None else np.nan
+        rev = ultimo(ing_ttm, fch) if ing_ttm is not None else np.nan
+        n_acc = ultimo(acc, fch, "val") if len(acc) else (
+            ni / ultimo(bpa_ttm, fch) if np.isfinite(ni) else np.nan)
+        mcap = px * n_acc if (np.isfinite(px) and np.isfinite(n_acc) and n_acc > 0) else np.nan
+        sp = rev / mcap if (np.isfinite(rev) and np.isfinite(mcap)) else np.nan
+        margen = ni / rev if (np.isfinite(ni) and np.isfinite(rev) and rev > 0) else np.nan
+        eq = ultimo(pat, fch, "val") if len(pat) else np.nan
+        roe = ni / eq if (np.isfinite(ni) and np.isfinite(eq) and eq > 0) else np.nan
+        # estabilidad de beneficio: -std del crecimiento interanual del BPA (mayor=mejor)
+        pub = bpa_ttm[bpa_ttm["filed"] < fch]
+        estab = -float(pub["ttm"].pct_change().tail(8).std()) if len(pub) >= 9 else np.nan
+        size = -np.log(mcap) if (np.isfinite(mcap) and mcap > 0) else np.nan
+        filas.append((ey, sp, margen, roe, estab, size))
+    return pd.DataFrame(filas, index=idx, columns=cols)
 
 
 def rasgos_fundamentales(ticker, fechas, cik=None, cliente=None):

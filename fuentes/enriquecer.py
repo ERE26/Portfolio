@@ -12,11 +12,13 @@ from . import sec, fred
 
 
 class Enriquecedor:
-    def __init__(self, con_sec=True, con_fred=True, con_13f=False, clave_fred=None, verbose=False):
+    def __init__(self, con_sec=True, con_fred=True, con_13f=False, con_factores=False,
+                 clave_fred=None, verbose=False):
         self.cli = Cliente(ttl=7 * 24 * 3600)
         self.con_sec = con_sec
         self.con_fred = con_fred
         self.con_13f = con_13f
+        self.con_factores = con_factores
         self.clave_fred = clave_fred
         self.verbose = verbose
         self._cik = None
@@ -25,7 +27,7 @@ class Enriquecedor:
 
     @property
     def cik(self):
-        if self._cik is None and self.con_sec:
+        if self._cik is None and (self.con_sec or self.con_factores):
             try:
                 self._cik = sec.mapa_cik(self.cli)
             except Exception as e:
@@ -48,12 +50,18 @@ class Enriquecedor:
                     self._macro_cache[clave] = None
         return self._macro_cache[clave]
 
-    def __call__(self, ticker, fechas):
+    def __call__(self, ticker, fechas, precio=None):
         out = {}
         if self.con_sec and ticker in self.cik:
             try:
                 out["fundamentales"] = sec.rasgos_fundamentales(ticker, fechas,
                                                                 self.cik[ticker], self.cli)
+            except Exception:
+                pass
+        if self.con_factores and ticker in self.cik and precio is not None:
+            try:
+                out["factores"] = sec.factores_valor_calidad(ticker, fechas, precio,
+                                                             self.cik[ticker], self.cli)
             except Exception:
                 pass
         m = self._macro(fechas) if self.con_fred else None

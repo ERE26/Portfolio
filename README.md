@@ -295,6 +295,67 @@ resultado sería sobreajuste.)
 python bot.py analizar --fuente mercado   # meta-labeling + barreras + edge por segmento
 ```
 
+## Aprender de los grandes y de los factores que mueven el mercado
+
+Dos fuentes de ventaja que los grandes gestores usan, incorporadas con datos
+reales:
+
+**Smart money — qué compran los grandes fondos (13F de la SEC).** Todo gestor con
+más de $100M declara sus posiciones cada trimestre. `fuentes/form13f.py` agrega
+los 13F de 10 inversores de convicción (Berkshire, Pershing, Baupost, Viking…),
+point-in-time (respetando el retraso de ~45 días), y construye señales de
+consenso, convicción y acumulación/reducción. La literatura (Cohen-Polk-Silli
+2010, Aiken 2013) muestra que copiar sus posiciones de convicción da alpha pese al
+retraso. El comando `bot.py fondos` da el dossier en vivo:
+
+```
+  CONSENSO: Alphabet (8 fondos, 5 comprando), Amazon (6, acumulando), TSMC (5)...
+  REDUCIENDO: Capital One, Brookfield
+```
+
+La señal capta cosas reales: el recorte de Apple por Berkshire en 2024, la apuesta
+colectiva por IA/semiconductores. Mejora la **selección de alta convicción** del
+meta (precisión del cuartil más selectivo: 55.7% → 58.4%).
+
+**Factores cuánticos (AQR / Fama-French).** `patrones/factores.py` + `fuentes/sec.py`
+calculan los *return drivers* probados, normalizados en **sección cruzada** (z-score
+del rango por fecha, como hace AQR, para que sean comparables entre acciones):
+
+- **Value**: earnings yield (E/P), sales-to-price. El E/P tiene IC +0.040
+  (p=0.005) con el retorno futuro — señal direccional real.
+- **Quality**: margen neto, ROE, estabilidad de beneficios.
+- **Momentum 12-1** (Jegadeesh-Titman): retorno de 12 meses saltando el último
+  (para evitar la reversión de corto plazo).
+- **Size**: −ln(capitalización).
+
+Añadir los factores sube el acierto bruto (50.9% → 52.5%) y el sistema completo:
+
+### Resultado final del sistema
+
+Encadenando todas las capas de análisis, cada una medida con walk-forward, purga
+temporal y costes:
+
+![Evolución del sistema](figuras/13_evolucion.png)
+
+| Capa acumulada | Sharpe | Profit Factor |
+|---|---|---|
+| Meta-labeling + barreras asimétricas | 0.80 | 1.41 |
+| + filtro de régimen de mercado | 1.21 | 1.67 |
+| + fundamentales (SEC) + macro (FRED) | 1.28 | 1.72 |
+| + smart money (13F) | 1.38 | 1.80 |
+| **+ factores (AQR)** | **1.55** | **1.92** |
+
+El sistema final opera ~19% de las señales con **Sharpe 1.55, Profit Factor 1.92,
+rentable en los 4 periodos** (incluido el bajista de 2022). Sigue siendo un
+backtest con costes y purga, no una cuenta real — pero cada capa de "aprender más"
+(de los fundamentales, de los grandes fondos, de los factores académicos) mejora
+el resultado de forma medible y defendible.
+
+```bash
+python bot.py fondos                                         # dossier de los grandes fondos
+python bot.py analizar --fuente mercado --con-13f            # análisis con todas las capas
+```
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -388,6 +449,7 @@ patrones/
   etiquetado.py          triple-barrier labeling (objetivo/stop/tiempo) + unicidad
   meta.py                meta-labeling: elegir qué señales operar
   rentabilidad.py        barreras asimétricas, edge por segmento, reglas del sistema
+  factores.py            normalización cross-sectional de factores (estilo AQR)
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
@@ -400,10 +462,11 @@ fuentes/
   noticias_reales.py     fuente de noticias reales compatible con el pipeline
   universo.py            catálogo de +100 tickers (acciones por sector, divisas, fondos)
   descarga.py            descarga por lotes multi-temporalidad con caché
-  sec.py                 SEC EDGAR: fundamentales point-in-time (gratis)
+  sec.py                 SEC EDGAR: fundamentales + factores value/quality point-in-time
   fred.py                FRED: macro de régimen (VIX, curva, crédito)
-  enriquecer.py          combina SEC + FRED como features del pipeline
-tests/                   40+ tests; el grueso vigila que no se cuele información del futuro
+  form13f.py             smart money: posiciones de los grandes fondos (13F)
+  enriquecer.py          combina SEC + FRED + 13F + factores como features
+tests/                   47 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

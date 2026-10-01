@@ -157,3 +157,36 @@ def test_13f_sin_mapeo_neutro():
     fechas = pd.to_datetime(["2024-01-01", "2024-02-01"])
     s = form13f.señal_ticker("ZZZZ", fechas, {}, patron=None)
     assert (s == 0).all().all()
+
+
+# ------------------------------------------------- factores value/quality
+def test_momentum_12_1_sin_lookahead():
+    import numpy as np, pandas as pd
+    from patrones.indicadores import momentum_12_1
+    c = pd.Series(100 + np.arange(400, dtype=float))
+    m = momentum_12_1(c)
+    # en t, usa c[t-21]/c[t-252]-1: nunca el presente ni el futuro
+    assert pd.isna(m.iloc[250])          # no hay 252 barras atras aun
+    assert np.isfinite(m.iloc[300])
+    # cambiar el futuro no altera el momentum pasado
+    c2 = c.copy(); c2.iloc[320:] += 500
+    assert abs(momentum_12_1(c2).iloc[300] - m.iloc[300]) < 1e-9
+
+
+def test_normalizacion_cross_sectional():
+    """Tras normalizar, cada factor tiene media ~0 y desviacion ~1 por mes."""
+    import numpy as np, pandas as pd
+    from fuentes.descarga import cargar_mercado
+    from fuentes.enriquecer import Enriquecedor
+    from patrones import contexto, ventanas
+    pre, meta = cargar_mercado("datos/mercado", "1d")
+    msi = meta.set_index("ticker")
+    tickers = [t for t in pre if msi.loc[t, "clase"] == "accion"][:15]
+    sub = {t: pre[t][pre[t].index >= pd.Timestamp.now() - pd.Timedelta(days=4 * 365)] for t in tickers}
+    enr = Enriquecedor(con_sec=False, con_fred=False, con_factores=True, verbose=False)
+    b = ventanas.construir(sub, contexto.Contexto(sub, meta), None,
+                           ventanas.Config(paso=5), verbose=False, enriquecer=enr)
+    ey = b.feat[:, b.nombres_feat.index("fac_earnings_yield")]
+    nz = ey[ey != 0]
+    assert len(nz) > 100
+    assert abs(nz.mean()) < 0.2 and 0.7 < nz.std() < 1.3   # ~z-score

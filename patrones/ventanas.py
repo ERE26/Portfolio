@@ -58,6 +58,8 @@ GRUPOS_ESCALARES = {
     "macro": ["macro_vix", "macro_vix_cambio", "macro_pendiente_curva",
               "macro_spread_credito", "macro_tendencia_tipos"],
     "institucional": ["inst_presencia", "inst_peso", "inst_cambio", "inst_nuevo"],
+    "factores": ["mom_12_1", "fac_earnings_yield", "fac_sales_price", "fac_margen_neto",
+                 "fac_roe", "fac_estab_beneficio", "fac_size"],
 }
 NOMBRES_ESCALARES = [c for cols in GRUPOS_ESCALARES.values() for c in cols]
 
@@ -97,6 +99,7 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extr
     out["di_dif"] = (di_mas - di_menos) / 100.0
     for n in (1, 5, 20, 60):
         out[f"ret_{n}"] = np.log(c / c.shift(n))
+    out["mom_12_1"] = ind.momentum_12_1(c)
     out["pos_sma50"] = c / sma50 - 1.0
     out["pos_sma200"] = c / sma200 - 1.0
     out["pend_sma50"] = ind.pendiente(sma50, 20)
@@ -119,7 +122,8 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extr
     fuentes = {"contexto": rasgos_contexto, "noticias": rasgos_noticias,
                "fundamentales": rasgos_extra.get("fundamentales"),
                "macro": rasgos_extra.get("macro"),
-               "institucional": rasgos_extra.get("institucional")}
+               "institucional": rasgos_extra.get("institucional"),
+               "factores": rasgos_extra.get("factores")}
     for origen in ("contexto", "noticias", "fundamentales", "macro", "institucional"):
         fuente = fuentes[origen]
         for col in GRUPOS_ESCALARES[origen]:
@@ -127,7 +131,16 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extr
                 out[col] = fuente[col].reindex(df.index).astype(float)
             else:
                 out[col] = 0.0
-    return out[NOMBRES_ESCALARES].fillna(0.0)
+    # factores value/quality/size del enriquecedor (mom_12_1 ya calculado arriba).
+    # Se dejan SIN rellenar NaN: la normalizacion cross-sectional los trata luego.
+    fac = rasgos_extra.get("factores")
+    for col in GRUPOS_ESCALARES["factores"]:
+        if col == "mom_12_1":
+            continue
+        out[col] = fac[col].reindex(df.index).astype(float) if (fac is not None and col in fac) else np.nan
+    cols_no_fac = [c for c in NOMBRES_ESCALARES if not c.startswith("fac_")]
+    out[cols_no_fac] = out[cols_no_fac].fillna(0.0)
+    return out[NOMBRES_ESCALARES]
 
 
 class BancoCasos:
@@ -226,7 +239,7 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         rn = mod_noticias.rasgos_sentimiento(fuente_noticias, t, df.index,
                                              cfg.dias_noticias, cfg.semivida_noticias) \
             if not isinstance(fuente_noticias, mod_noticias.SinNoticias) else None
-        extra = enriquecer(t, df.index) if enriquecer is not None else None
+        extra = enriquecer(t, df.index, df["close"]) if enriquecer is not None else None
         F = rasgos_escalares(df, rc, rn, rasgos_extra=extra)
 
         lc = np.log(df["close"].to_numpy(float))
@@ -270,8 +283,11 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
             tfs[nombre] = m
             ok_tf &= ok
 
-        valido = np.isfinite(Mf).all(axis=1) & np.isfinite(ret) & np.isfinite(caminos).all(axis=1) \
-            & np.isfinite(formas).all(axis=1) & ok_tf
+        # las columnas de factores value/quality pueden ser NaN hasta la
+        # normalizacion cross-sectional posterior, asi que no entran en la validez.
+        idx_no_fac = [i for i, c in enumerate(NOMBRES_ESCALARES) if not c.startswith("fac_")]
+        valido = np.isfinite(Mf[:, idx_no_fac]).all(axis=1) & np.isfinite(ret) \
+            & np.isfinite(caminos).all(axis=1) & np.isfinite(formas).all(axis=1) & ok_tf
         if not valido.any():
             if verbose:
                 print(f"  {t}: ningun caso valido (faltan indicadores o velas superiores).")
@@ -312,7 +328,16 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         caminos_high=np.concatenate(acum["caminos_high"]),
         caminos_low=np.concatenate(acum["caminos_low"]))
     orden = np.argsort(banco.meta["fecha"].to_numpy(), kind="stable")
-    return banco.subconjunto(orden)
+    banco = banco.subconjunto(orden)
+    # normalizacion cross-sectional de los factores (si hay alguno no nulo)
+    fac_cols = [c for c in GRUPOS_ESCALARES["factores"] if c.startswith("fac_")]
+    idx_fac = [banco.nombres_feat.index(c) for c in fac_cols]
+    if np.isfinite(banco.feat[:, idx_fac]).any() and np.nanstd(banco.feat[:, idx_fac]) > 0:
+        from .factores import normalizar_cross_sectional
+        normalizar_cross_sectional(banco)
+    else:
+        banco.feat[:, idx_fac] = np.nan_to_num(banco.feat[:, idx_fac], nan=0.0)
+    return banco
 
 
 def etiquetar(banco, registro, tolerancia_dias=3):
@@ -365,7 +390,7 @@ def caso_vivo(precios, ctx=None, fuente_noticias=None, cfg=None, ticker=None, en
     rn = mod_noticias.rasgos_sentimiento(fuente_noticias, ticker, df.index,
                                          cfg.dias_noticias, cfg.semivida_noticias) \
         if not isinstance(fuente_noticias, mod_noticias.SinNoticias) else None
-    extra = enriquecer(ticker, df.index) if enriquecer is not None else None
+    extra = enriquecer(ticker, df.index, df["close"]) if enriquecer is not None else None
     F = rasgos_escalares(df, rc, rn, rasgos_extra=extra)
 
     lc = np.log(df["close"].to_numpy(float))

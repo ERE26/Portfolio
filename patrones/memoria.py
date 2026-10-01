@@ -33,10 +33,10 @@ from .ventanas import GRUPOS_ESCALARES, BancoCasos, Config
 EPS = 1e-9
 
 PESOS_INICIALES = {
-    "forma": 0.18, "tf_semanal": 0.09, "tf_mensual": 0.05, "forma_volumen": 0.08,
+    "forma": 0.16, "tf_semanal": 0.08, "tf_mensual": 0.05, "forma_volumen": 0.07,
     "osciladores": 0.11, "momento": 0.11, "volumen": 0.08, "volatilidad": 0.07,
-    "contexto": 0.06, "noticias": 0.03, "fundamentales": 0.05, "macro": 0.03,
-    "institucional": 0.06,
+    "contexto": 0.05, "noticias": 0.03, "fundamentales": 0.04, "macro": 0.03,
+    "institucional": 0.05, "factores": 0.07,
 }
 
 

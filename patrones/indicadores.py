@@ -112,3 +112,10 @@ def pendiente(x, n):
 
     cruda = s.rolling(n, min_periods=n).apply(_fit, raw=True)
     return cruda / s.rolling(n, min_periods=n).mean().abs().replace(0.0, np.nan)
+
+
+def momentum_12_1(close):
+    """Momentum 12-1 (Jegadeesh-Titman): retorno de t-252 a t-21 (12 meses saltando
+    el ultimo, para evitar la reversion a corto plazo). Solo usa el pasado."""
+    c = _s(close)
+    return c.shift(21) / c.shift(252) - 1.0
