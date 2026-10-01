@@ -94,3 +94,36 @@ def test_sec_sin_red_neutro():
     r = sec.rasgos_fundamentales("ZZZZ", pd.bdate_range("2023-01-01", periods=10),
                                  cik="9999999999", cliente=_ClienteFalla())
     assert (r == 0).all().all()
+
+
+# ------------------------------------------------- rentabilidad
+def test_recalcular_etiqueta_coincide():
+    """Recalcular con el mismo ratio del banco debe dar la misma etiqueta."""
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=4, n_barras=900, semilla=1)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    r = et.recalcular_etiqueta(b, b.cfg.k_pt, b.cfg.k_sl)
+    assert (r["label"] == b.y.tb_label.to_numpy()).mean() > 0.98
+
+
+def test_asimetria_mejora_retorno():
+    """Un objetivo mayor que el stop sube el retorno medio aunque baje el acierto."""
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=6, n_barras=1400, semilla=5)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    sim = et.recalcular_etiqueta(b, 1.0, 1.0)["ret"].mean()
+    asi = et.recalcular_etiqueta(b, 3.0, 1.0)["ret"].mean()
+    # con objetivo 3x y stop 1x, el retorno medio en ATR es mayor que simetrico
+    assert asi > sim
+
+
+def test_etiqueta_desde_recorrido_vs_recalcular():
+    """La etiqueta por recorrido (rentabilidad) coincide con la del banco (etiquetado)."""
+    import numpy as np, pandas as pd
+    from patrones.rentabilidad import etiqueta_desde_recorrido
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=4, n_barras=900, semilla=2)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    df = pd.DataFrame({"lado": np.ones(len(b), int),
+                       "cam_high": list(b.caminos_high), "cam_low": list(b.caminos_low),
+                       "cam_close": list(b.caminos)})
+    ret_rec = etiqueta_desde_recorrido(df, 2.0, 1.0)
+    ret_banco = et.recalcular_etiqueta(b, 2.0, 1.0)["ret"]
+    assert np.allclose(ret_rec, ret_banco, atol=1e-5)

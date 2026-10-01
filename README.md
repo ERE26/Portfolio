@@ -239,6 +239,62 @@ excluye el 50%); el macro ayuda al Sharpe pero con cobertura pequeña. El aciert
 bruto no se mueve — como debe ser en un mercado real. El valor está en *elegir
 mejor*, no en adivinar más.
 
+## De acertar a ganar: asimetría, segmentación y régimen
+
+El acierto direccional es la pregunta equivocada para ganar dinero. Un sistema es
+rentable aunque acierte <50% si **gana más de lo que arriesga**. Esta fase mide
+eso (`patrones/rentabilidad.py`), con el recorrido futuro de máximos y mínimos
+guardado en cada caso para recalcular cualquier configuración sin reentrenar.
+
+**1. Barreras asimétricas.** Con objetivo y stop simétricos el sistema pierde
+(profit factor 0.99); con objetivo 3×ATR y stop 1.5×ATR es rentable (PF 1.25),
+aunque solo gane el 47% de las veces.
+
+![Barreras asimétricas](figuras/08_barreras.png)
+
+**2. Dónde funciona el edge.** Segmentando las operaciones se ve con claridad
+dónde conviene operar y dónde no:
+
+- **Volatilidad baja → pierde** (PF 0.83); media/alta → gana (PF 1.22).
+- **Cortos → pierden** (PF 0.93); largos → ganan (PF 1.19) — sesgo alcista del
+  periodo.
+- **Sectores**: bonos, inmobiliario y financiero lideran (PF 1.4–1.85); energía y
+  materiales pierden (PF 0.76–0.80).
+
+![Edge por sector](figuras/09_edge_sector.png)
+
+**3. Régimen de mercado (clave para la robustez).** Filtrar por condiciones de
+edge sube el rendimiento, pero un sistema de "solo largos" **pierde en el año
+bajista (2022)**. Añadir un filtro de tendencia del mercado (operar largos solo
+cuando el índice está sobre su SMA200) rescata ese año y da un sistema **estable
+en los 4 pliegues temporales**:
+
+| Reglas (todas *a priori*) | Sharpe | Profit Factor | Pliegues rentables |
+|---|---|---|---|
+| Base (meta ≥ 0.55) | 0.39 | 1.19 | — |
+| + solo largos | 0.58 | 1.29 | 3/4 |
+| + evitar volatilidad baja | 0.80 | 1.41 | 3/4 |
+| **+ mercado alcista** | **1.21** | **1.67** | **4/4** |
+
+![Progresión](figuras/10_filtrado.png) ![Robustez](figuras/11_robustez.png)
+
+El sistema final (`rentabilidad.REGLAS_SISTEMA`) opera el ~27% de las señales con
+**Sharpe 1.21 y profit factor 1.67**, rentable en los cuatro periodos. Las reglas
+—asimetría, sesgo largo, evitar baja volatilidad, operar con la tendencia— son
+principios defendibles decididos *antes* de ver el test, no ajustados a él. (El
+filtro por sector se deja fuera a propósito: elegir "buenos sectores" mirando el
+resultado sería sobreajuste.)
+
+> **Honestidad metodológica.** Esto es un backtest sobre datos reales con costes,
+> walk-forward y purga temporal, no una cuenta real. El deslizamiento, la
+> capacidad y los cambios de régimen futuros no están garantizados. Un Sharpe 1.2
+> en backtest es alentador, no una promesa — pero el camino (asimetría + selección
+> + régimen) es el correcto y está medido sin trampas.
+
+```bash
+python bot.py analizar --fuente mercado   # meta-labeling + barreras + edge por segmento
+```
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -331,6 +387,7 @@ patrones/
   explicar.py            desglose de por qué dos tramos se parecen
   etiquetado.py          triple-barrier labeling (objetivo/stop/tiempo) + unicidad
   meta.py                meta-labeling: elegir qué señales operar
+  rentabilidad.py        barreras asimétricas, edge por segmento, reglas del sistema
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
@@ -346,7 +403,7 @@ fuentes/
   sec.py                 SEC EDGAR: fundamentales point-in-time (gratis)
   fred.py                FRED: macro de régimen (VIX, curva, crédito)
   enriquecer.py          combina SEC + FRED como features del pipeline
-tests/                   40 tests; el grueso vigila que no se cuele información del futuro
+tests/                   40+ tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

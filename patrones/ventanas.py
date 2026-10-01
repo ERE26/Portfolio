@@ -131,7 +131,8 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extr
 class BancoCasos:
     """Todos los casos de todos los valores, ya alineados y listos para usar."""
 
-    def __init__(self, cfg, formas, formas_vol, tf, feat, meta, y, caminos):
+    def __init__(self, cfg, formas, formas_vol, tf, feat, meta, y, caminos,
+                 caminos_high=None, caminos_low=None):
         self.cfg = cfg
         self.formas = formas
         self.formas_vol = formas_vol
@@ -140,6 +141,10 @@ class BancoCasos:
         self.meta = meta.reset_index(drop=True)
         self.y = y.reset_index(drop=True)
         self.caminos = caminos
+        # recorrido futuro de maximos y minimos (en ATR): permite recalcular la
+        # etiqueta triple-barrera para cualquier ratio sin reconstruir el banco.
+        self.caminos_high = caminos_high
+        self.caminos_low = caminos_low
         self.nombres_feat = list(NOMBRES_ESCALARES)
 
     def __len__(self):
@@ -158,9 +163,12 @@ class BancoCasos:
 
     def subconjunto(self, mascara):
         m = np.asarray(mascara)
+        ch = self.caminos_high[m] if self.caminos_high is not None else None
+        cl = self.caminos_low[m] if self.caminos_low is not None else None
         return BancoCasos(self.cfg, self.formas[m], self.formas_vol[m],
                           {k: v[m] for k, v in self.tf.items()}, self.feat[m],
-                          self.meta.loc[m].copy(), self.y.loc[m].copy(), self.caminos[m])
+                          self.meta.loc[m].copy(), self.y.loc[m].copy(), self.caminos[m],
+                          caminos_high=ch, caminos_low=cl)
 
     def resumen(self):
         return (f"{len(self)} casos | {self.meta.ticker.nunique()} valores | "
@@ -199,7 +207,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
     fuente_noticias = fuente_noticias or mod_noticias.SinNoticias()
     largos_tf = {"semanal": cfg.largo_semanal, "mensual": cfg.largo_mensual}
 
-    acum = {"formas": [], "formas_vol": [], "feat": [], "caminos": [], "meta": [], "y": [],
+    acum = {"formas": [], "formas_vol": [], "feat": [], "caminos": [],
+            "caminos_high": [], "caminos_low": [], "meta": [], "y": [],
             "tf": {k: [] for k in cfg.temporalidades}}
 
     for t in tickers:
@@ -243,6 +252,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         Wfl = ventanas_de(ll, H)
         base = lc[pos]
         caminos = (Wfc[pos + 1] - base[:, None]) / atr_pct[:, None]
+        caminos_high = (Wfh[pos + 1] - base[:, None]) / atr_pct[:, None]
+        caminos_low = (Wfl[pos + 1] - base[:, None]) / atr_pct[:, None]
         ret = lc[pos + H] - base
         mfe = (Wfh[pos + 1].max(axis=1) - base) / atr_pct
         mae = (Wfl[pos + 1].min(axis=1) - base) / atr_pct
@@ -268,6 +279,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         acum["formas_vol"].append(formas_vol[valido])
         acum["feat"].append(Mf[valido].astype(np.float32))
         acum["caminos"].append(caminos[valido].astype(np.float32))
+        acum["caminos_high"].append(caminos_high[valido].astype(np.float32))
+        acum["caminos_low"].append(caminos_low[valido].astype(np.float32))
         for nombre in cfg.temporalidades:
             acum["tf"][nombre].append(tfs[nombre][valido])
         acum["meta"].append(pd.DataFrame({
@@ -293,7 +306,9 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         np.concatenate(acum["feat"]),
         pd.concat(acum["meta"], ignore_index=True),
         pd.concat(acum["y"], ignore_index=True),
-        np.concatenate(acum["caminos"]))
+        np.concatenate(acum["caminos"]),
+        caminos_high=np.concatenate(acum["caminos_high"]),
+        caminos_low=np.concatenate(acum["caminos_low"]))
     orden = np.argsort(banco.meta["fecha"].to_numpy(), kind="stable")
     return banco.subconjunto(orden)
 

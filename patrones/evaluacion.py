@@ -287,9 +287,12 @@ def informe(resultados, banco_test=None, coste_bps=10.0, horizonte=10, titulo="R
 # EVALUACION CON META-LABELING: "cual elegir para acertar"
 # ============================================================================
 def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
-    """Genera predicciones primarias + features del meta para un subconjunto."""
+    """Genera predicciones primarias + features del meta para un subconjunto.
+
+    Devuelve tambien los indices usados, para poder recuperar despues el recorrido
+    (caminos high/low) de cada senal y recalcular barreras de otro ratio."""
     from .meta import features_meta, etiqueta_acierto
-    filas_f, aciertos, info = [], [], []
+    filas_f, aciertos, info, idxs = [], [], [], []
     for i in range(len(banco_sub)):
         p = mem.predecir(banco_sub, i)
         if p.abstencion and len(p.vecinos) == 0:
@@ -301,8 +304,15 @@ def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
         info.append({"fecha": p.fecha, "ticker": p.ticker, "lado": lado,
                      "prob": p.prob_sube, "confianza": p.confianza,
                      "tb_ret": yf.get("tb_ret", np.nan), "tb_label": yf.get("tb_label", np.nan),
-                     "ret": yf.get("ret", np.nan), "atr_pct": yf.get("atr_pct", np.nan)})
-    return filas_f, np.array(aciertos), pd.DataFrame(info)
+                     "ret": yf.get("ret", np.nan),
+                     "atr_pct": float(banco_sub.meta["atr_pct"].iloc[i])
+                     if "atr_pct" in banco_sub.meta else np.nan,
+                     "sector": banco_sub.meta["sector"].iloc[i] if "sector" in banco_sub.meta else "",
+                     "patron": banco_sub.meta["patron"].iloc[i] if "patron" in banco_sub.meta else "",
+                     "mkt_alcista": float(banco_sub.feat[i, banco_sub.nombres_feat.index("mkt_sobre_sma200")])
+                     if "mkt_sobre_sma200" in banco_sub.nombres_feat else np.nan})
+        idxs.append(i)
+    return filas_f, np.array(aciertos), pd.DataFrame(info), np.array(idxs, int)
 
 
 def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
@@ -339,7 +349,7 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         # 1-2) memoria pasado-lejano -> predicciones de validacion -> meta
         mem0 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem0))
         val = submuestreo_no_solapado(banco.subconjunto(m_val), max(1, cfg.horizonte // 2))
-        fval, aval, _ = _predicciones_con_features(mem0, val)
+        fval, aval, _, _ = _predicciones_con_features(mem0, val)
         if len(aval) < 80 or len(np.unique(aval)) < 2:
             if verbose:
                 print(f"  pliegue {j}: validacion insuficiente, se salta")
@@ -352,12 +362,16 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         # 3) memoria con todo el pasado -> test -> seleccion por meta
         mem1 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem1))
         test = submuestreo_no_solapado(banco.subconjunto(m_test), paso_test)
-        ftest, atest, itest = _predicciones_con_features(mem1, test)
+        ftest, atest, itest, idx_test = _predicciones_con_features(mem1, test)
         if len(atest) < 10:
             continue
         itest["acierto_primario"] = atest
         itest["prob_meta"] = meta.prob_acierto(ftest)
         itest["pliegue"] = j
+        # recorridos de cada senal, para recalcular barreras de otro ratio
+        itest["cam_high"] = list(test.caminos_high[idx_test]) if test.caminos_high is not None else None
+        itest["cam_low"] = list(test.caminos_low[idx_test]) if test.caminos_low is not None else None
+        itest["cam_close"] = list(test.caminos[idx_test])
         todo.append(itest)
         if verbose:
             print(f"  pliegue {j}: memoria {m_mem1.sum()} | val {len(aval)} | test {len(atest)} "

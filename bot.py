@@ -316,6 +316,48 @@ def cmd_buscar(args):
     print("\n  (Herramienta de estudio; no es recomendacion de inversion.)")
 
 
+def cmd_analizar(args):
+    """Evalua el meta-labeling y analiza barreras y segmentos de edge."""
+    import numpy as np, pandas as pd
+    from patrones import evaluacion, rentabilidad, ventanas as mod_v, contexto as mod_ctx
+    args.fuente = "mercado"
+    args.con_fundamentales = True
+    _OPCS_mercado(args)
+    from fuentes.descarga import cargar_mercado
+    pre, meta = cargar_mercado(args.mercado, args.intervalo)
+    msi = meta.set_index("ticker")
+    tickers = [t for t in pre if msi.loc[t, "clase"] in ("accion", "fondo")] if "clase" in meta else list(pre)
+    corte = pd.Timestamp.now() - pd.Timedelta(days=int(args.anos * 365))
+    pre = {t: pre[t][pre[t].index >= corte] for t in tickers}
+    pre = {t: d for t, d in pre.items() if len(d) > 320}
+    ctx = mod_ctx.Contexto(pre, meta)
+    from fuentes.enriquecer import Enriquecedor
+    enr = Enriquecedor(con_sec=args.con_fundamentales, con_fred=args.con_macro,
+                       clave_fred=args.clave_fred, verbose=True)
+    cfg = mod_v.Config(largo=args.largo, horizonte=args.horizonte, paso=args.paso)
+    print(f"Construyendo banco ({len(pre)} valores)...")
+    b = mod_v.construir(pre, ctx, None, cfg, verbose=False, enriquecer=enr)
+    print(f"  {len(b)} casos. Evaluando meta-labeling (2 etapas)...")
+    res, imp = evaluacion.evaluar_meta(b, n_pliegues=args.pliegues, k=args.k, verbose=True)
+    evaluacion.informe_meta(res, titulo="META-LABELING")
+
+    print("\n-- Barrido de barreras asimetricas (dimensionado por confianza) --")
+    ratios = [(1.0,1.0),(1.5,1.5),(2.0,1.0),(2.5,1.0),(3.0,1.0),(2.0,1.5)]
+    tab = rentabilidad.barrido_barreras(res, ratios, umbral_meta=args.umbral_meta)
+    print(tab[["ratio","operaciones","cobertura","pct_ganadoras","ret_medio_atr",
+               "sharpe","profit_factor"]].round(3).to_string(index=False))
+
+    print("\n-- Donde funciona el edge (ratio 2.5:1.0) --")
+    seg = rentabilidad.edge_por_segmento(res, 2.5, 1.0)
+    for dim, t in seg.items():
+        print(f"\n  por {dim}:")
+        print(t.round(3).to_string(index=False))
+
+
+def _OPCS_mercado(args):
+    pass
+
+
 def cmd_descargar(args):
     """Descarga el universo del catalogo a CSV (uno por ticker y temporalidad)."""
     from fuentes.descarga import descargar_universo
@@ -423,6 +465,16 @@ def main(argv=None):
     pb.add_argument("--mercado", default="datos/mercado",
                     help="carpeta de CSV descargados (si se usa --fuente mercado)")
     pb.set_defaults(func=cmd_buscar)
+
+    pan = sub.add_parser("analizar",
+                         help="analisis profundo: meta-labeling, barreras y donde funciona el edge")
+    _comunes(pan)
+    pan.add_argument("--pliegues", type=int, default=4)
+    pan.add_argument("--mercado", default="datos/mercado")
+    pan.add_argument("--paso", type=int, default=5)
+    pan.add_argument("--anos", type=float, default=10.0)
+    pan.add_argument("--umbral-meta", type=float, default=0.55)
+    pan.set_defaults(func=cmd_analizar)
 
     pdl = sub.add_parser("descargar",
                          help="descarga el universo (+100 tickers) a datos/mercado")

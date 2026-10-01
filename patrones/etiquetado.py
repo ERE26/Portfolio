@@ -100,3 +100,31 @@ def pesos_unicidad(fechas_idx, barras, horizonte):
     out = np.empty(n)
     out[orden] = w / w.mean()
     return out.astype(np.float32)
+
+
+def recalcular_etiqueta(banco, k_pt, k_sl):
+    """Recalcula la etiqueta triple-barrera para otro ratio, sin reconstruir.
+
+    Usa los recorridos de maximos y minimos ya guardados en el banco (en ATR),
+    asi que permite barrer rapido muchos ratios objetivo/stop. Devuelve un dict
+    con label, ret (en ATR) y barras, con la misma convencion que triple_barrera.
+    """
+    if banco.caminos_high is None or banco.caminos_low is None:
+        raise RuntimeError("El banco no guarda caminos_high/low; reconstruyelo.")
+    H = banco.caminos.shape[1]
+    hi = banco.caminos_high            # (n, H) en ATR desde la entrada
+    lo = banco.caminos_low
+    n = len(hi)
+    toca_up = hi >= k_pt
+    toca_dn = lo <= -k_sl
+    GRANDE = H + 10
+    t_up = np.where(toca_up.any(1), toca_up.argmax(1), GRANDE)
+    t_dn = np.where(toca_dn.any(1), toca_dn.argmax(1), GRANDE)
+    label = np.zeros(n, np.int8)
+    ret = banco.caminos[:, -1].copy()          # vencimiento: retorno de cierre (ATR)
+    barras = np.full(n, H, int)
+    gana = (t_up < t_dn) & (t_up < GRANDE)
+    perd = ((t_dn <= t_up) & (t_dn < GRANDE))
+    label[gana] = 1; ret[gana] = k_pt; barras[gana] = t_up[gana] + 1
+    label[perd] = -1; ret[perd] = -k_sl; barras[perd] = t_dn[perd] + 1
+    return {"label": label, "ret": ret.astype(np.float32), "barras": barras.astype(np.int16)}
