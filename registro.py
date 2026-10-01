@@ -63,6 +63,12 @@ def reconciliar():
     if not os.path.exists(LOG):
         return 0
     df = pd.read_csv(LOG)
+    # columnas de texto que se rellenan al cerrar: deben ser 'object' para poder
+    # asignarles cadenas (si el CSV venia de antes podrian leerse como float/NaN).
+    for col in ("salida", "salida_ts", "snapshot", "pnl", "resultado"):
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].astype(object)
     abiertas = df[df["resultado"] == "open"]
     if len(abiertas) == 0:
         return 0
