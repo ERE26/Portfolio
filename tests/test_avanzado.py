@@ -930,3 +930,20 @@ def test_tsmom_signal_y_backtest():
     assert sig["AAA"] > 0 and sig["BBB"] < 0           # largo el alcista, corto el bajista
     d, m = TS.backtest(pre, freq="ME", min_activos=2)
     assert "sharpe" in m and m["periodos"] > 12
+
+
+def test_tsmom_objetivo_long_flat():
+    """El Libro C (TSMOM long/flat) va largo solo en los activos con señal positiva,
+    reparte por vol y normaliza; los de señal negativa quedan en efectivo (0)."""
+    import numpy as np, pandas as pd
+    import operativa_tsmom as OT
+    idx = pd.date_range("2010-01-01", periods=400, freq="B")
+    panel = pd.DataFrame({
+        "SPY": np.linspace(100, 300, 400),    # alcista -> largo
+        "TLT": np.linspace(120, 70, 400),     # bajista -> efectivo (long/flat)
+        "GLD": np.linspace(100, 160, 400),    # alcista -> largo
+    }, index=idx)
+    obj, sig = OT.objetivo_tsmom(panel, capital=10000.0)
+    assert "SPY" in obj and "GLD" in obj
+    assert "TLT" not in obj                    # señal negativa -> efectivo
+    assert abs(sum(obj.values()) - 10000.0) < 1.0   # normalizado al capital

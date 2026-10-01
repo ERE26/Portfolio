@@ -52,11 +52,16 @@ MARGEN_FR = 0.002      # fuerza relativa: batir al mercado por >=0.2% hoy
 RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
 
 
+# reservados al Libro C (TSMOM cross-asset): se excluyen del intradia para que los
+# libros no se solapen en el mismo simbolo (una posicion por ticker en Alpaca).
+RESERVADOS_TSMOM = {"SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "HYG"}
+
+
 def universo_dinamico(con_europa=True):
     """Universo operable = base (EE.UU.) + EUROPA (ADRs/ETFs europeos cotizados en
-    EE.UU.) + descubrimientos recientes de la watchlist. Mas donde ELEGIR; la
-    confluencia de calidad decide. Los europeos compiten de igual a igual: se opera
-    el mejor, sea de EE.UU. o de Europa."""
+    EE.UU.) + descubrimientos recientes de la watchlist, MENOS los reservados al
+    Libro C (TSMOM). Mas donde ELEGIR; la confluencia de calidad decide. Los
+    europeos compiten de igual a igual: se opera el mejor, sea de EE.UU. o de Europa."""
     try:
         from descubrir import watchlist_vigente
         extra = watchlist_vigente()
@@ -65,7 +70,7 @@ def universo_dinamico(con_europa=True):
     u = set(UNIVERSO) | set(extra)
     if con_europa:
         u |= set(EUROPA)
-    return sorted(u)
+    return sorted(u - RESERVADOS_TSMOM)
 
 
 def señal(ticker, intervalo="15Min"):
