@@ -78,8 +78,51 @@ def rasgos_intradia(df):
     apertura = pd.Series(o, index=df.index).groupby(dia).transform("first")
     out["intra_ret_sesion"] = c / apertura - 1.0
 
+    # volumen relativo (RVOL): interes anormal a esta hora -> filtro clave intradia
+    out["intra_rvol"] = np.log(rvol(df).clip(0.1, 10))
+
     return out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
 NOMBRES_INTRA = ["intra_dist_vwap", "intra_pos_rango", "intra_hora_sin", "intra_hora_cos",
-                 "intra_vol_rel", "intra_gap", "intra_ret_sesion"]
+                 "intra_vol_rel", "intra_gap", "intra_ret_sesion", "intra_rvol"]
+
+
+def spread_corwin_schultz(df, ventana=20):
+    """Estimador del bid-ask spread solo con maximos y minimos (Corwin-Schultz 2012).
+
+    Permite meter el coste REAL de operar en el backtest sin datos de libro de
+    ordenes. Devuelve el spread estimado (fraccion del precio) suavizado en una
+    ventana. En intradia el coste decide la rentabilidad, asi que esta estimacion
+    por activo es esencial.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        h = np.log(df["high"].clip(lower=1e-9).to_numpy(float))
+        l = np.log(df["low"].clip(lower=1e-9).to_numpy(float))
+    hl = (h - l) ** 2
+    beta = pd.Series(hl, index=df.index).rolling(2).sum().to_numpy()  # barra t y t-1
+    h2 = np.maximum(h[1:], h[:-1])
+    l2 = np.minimum(l[1:], l[:-1])
+    gamma = np.concatenate([[np.nan], (h2 - l2) ** 2])
+    den = 3 - 2 * np.sqrt(2)
+    alpha = (np.sqrt(2 * beta) - np.sqrt(beta)) / den - np.sqrt(gamma / den)
+    s = 2 * (np.exp(alpha) - 1) / (1 + np.exp(alpha))
+    s = pd.Series(s, index=df.index).clip(lower=0)      # el spread no es negativo
+    return s.rolling(ventana, min_periods=5).median().fillna(s.median())
+
+
+def rvol(df, lookback=20):
+    """Relative Volume: volumen acumulado del dia hasta la barra t frente a la media
+    del volumen acumulado a la MISMA hora en los ultimos 'lookback' dias.
+
+    RVOL alto = interes anormal ahora (noticia/evento). Es el filtro que hace
+    funcionar los breakouts y los gaps; sin el, el edge intradia se diluye.
+    """
+    idx = pd.DatetimeIndex(df.index)
+    dia = idx.normalize()
+    cumv = pd.Series(df["volume"].to_numpy(float), index=df.index).groupby(dia).cumsum()
+    # media del cumv a la misma hora del dia, solo con dias anteriores
+    hora = idx.hour * 100 + idx.minute
+    out = cumv.groupby(hora).transform(
+        lambda s: s.shift(1).rolling(lookback, min_periods=3).mean())
+    return (cumv / out.replace(0, np.nan)).fillna(1.0).clip(0, 10)

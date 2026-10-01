@@ -126,7 +126,7 @@ REGLAS_SISTEMA = {
 }
 
 
-def aplicar_sistema(res, reglas=None, coste_atr=0.05):
+def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
     """Aplica las reglas de operativa a las senales y devuelve (operadas, metricas).
 
     Decide que operar con filtros defendibles a priori y mide el resultado por
@@ -134,6 +134,8 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05):
     """
     r = {**REGLAS_SISTEMA, **(reglas or {})}
     d = res.copy()
+    if invertir:                    # reversion: operar lo contrario de la senal
+        d["lado"] = -d["lado"]
     d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"]) - coste_atr
     vol = pd.Series([np.max(h) - np.min(l) for h, l in zip(d["cam_high"], d["cam_low"])],
                     index=d.index)

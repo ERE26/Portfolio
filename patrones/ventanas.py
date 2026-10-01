@@ -61,7 +61,7 @@ GRUPOS_ESCALARES = {
     "factores": ["mom_12_1", "fac_earnings_yield", "fac_sales_price", "fac_margen_neto",
                  "fac_roe", "fac_estab_beneficio", "fac_size"],
     "intradia": ["intra_dist_vwap", "intra_pos_rango", "intra_hora_sin", "intra_hora_cos",
-                 "intra_vol_rel", "intra_gap", "intra_ret_sesion"],
+                 "intra_vol_rel", "intra_gap", "intra_ret_sesion", "intra_rvol"],
 }
 NOMBRES_ESCALARES = [c for cols in GRUPOS_ESCALARES.values() for c in cols]
 

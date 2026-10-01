@@ -10,3 +10,5 @@ datos/mercado/
 !datos/.gitkeep
 .DS_Store
 datos/.fred_key
+datos/.alpaca_key
+datos/intraday/
