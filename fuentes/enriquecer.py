@@ -12,14 +12,16 @@ from . import sec, fred
 
 
 class Enriquecedor:
-    def __init__(self, con_sec=True, con_fred=True, clave_fred=None, verbose=False):
+    def __init__(self, con_sec=True, con_fred=True, con_13f=False, clave_fred=None, verbose=False):
         self.cli = Cliente(ttl=7 * 24 * 3600)
         self.con_sec = con_sec
         self.con_fred = con_fred
+        self.con_13f = con_13f
         self.clave_fred = clave_fred
         self.verbose = verbose
         self._cik = None
         self._macro_cache = {}
+        self._carteras = None
 
     @property
     def cik(self):
@@ -57,4 +59,13 @@ class Enriquecedor:
         m = self._macro(fechas) if self.con_fred else None
         if m is not None:
             out["macro"] = m
+        if self.con_13f:
+            try:
+                from . import form13f
+                if self._carteras is None:
+                    self._carteras = form13f.cargar_carteras(self.cli, self.verbose)
+                out["institucional"] = form13f.señal_ticker(ticker, fechas, self._carteras)
+            except Exception as e:
+                if self.verbose:
+                    print(f"  13F no disponible: {e}")
         return out

@@ -316,6 +316,22 @@ def cmd_buscar(args):
     print("\n  (Herramienta de estudio; no es recomendacion de inversion.)")
 
 
+def cmd_fondos(args):
+    """Inteligencia de los grandes inversores de conviccion a partir de sus 13F."""
+    from fuentes import form13f
+    from fuentes.http import Cliente
+    print("Descargando los 13F de los grandes fondos de conviccion...")
+    cons, compra, venta = form13f.dossier(Cliente(ttl=14 * 24 * 3600), top=args.top)
+    print("\n" + "=" * 70 + "\n  CONSENSO: valores con mas fondos de conviccion\n" + "=" * 70)
+    print(cons.to_string(index=False, formatters={"valor_M": "{:.0f}".format}))
+    print("\n-- Estan ACUMULANDO (consenso de compra) --")
+    print(compra[["emisor", "fondos", "comprando", "nuevas", "vendiendo"]].to_string(index=False))
+    print("\n-- Estan REDUCIENDO --")
+    print(venta[["emisor", "fondos", "vendiendo", "comprando"]].to_string(index=False))
+    print("\nSe aprende de ellos: alta conviccion colectiva + acumulacion = señal de calidad.")
+    print("(La señal 13F entra en el modelo con --con-13f, siempre point-in-time.)")
+
+
 def cmd_analizar(args):
     """Evalua el meta-labeling y analiza barreras y segmentos de edge."""
     import numpy as np, pandas as pd
@@ -333,6 +349,7 @@ def cmd_analizar(args):
     ctx = mod_ctx.Contexto(pre, meta)
     from fuentes.enriquecer import Enriquecedor
     enr = Enriquecedor(con_sec=args.con_fundamentales, con_fred=args.con_macro,
+                       con_13f=getattr(args, "con_13f", False),
                        clave_fred=args.clave_fred, verbose=True)
     cfg = mod_v.Config(largo=args.largo, horizonte=args.horizonte, paso=args.paso)
     print(f"Construyendo banco ({len(pre)} valores)...")
@@ -466,6 +483,11 @@ def main(argv=None):
                     help="carpeta de CSV descargados (si se usa --fuente mercado)")
     pb.set_defaults(func=cmd_buscar)
 
+    pf = sub.add_parser("fondos",
+                        help="dossier de los grandes fondos: consenso y movimientos (13F)")
+    pf.add_argument("--top", type=int, default=15)
+    pf.set_defaults(func=cmd_fondos)
+
     pan = sub.add_parser("analizar",
                          help="analisis profundo: meta-labeling, barreras y donde funciona el edge")
     _comunes(pan)
@@ -474,6 +496,7 @@ def main(argv=None):
     pan.add_argument("--paso", type=int, default=5)
     pan.add_argument("--anos", type=float, default=10.0)
     pan.add_argument("--umbral-meta", type=float, default=0.55)
+    pan.add_argument("--con-13f", action="store_true", help="incluye la señal smart money (13F)")
     pan.set_defaults(func=cmd_analizar)
 
     pdl = sub.add_parser("descargar",

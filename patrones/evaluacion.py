@@ -286,6 +286,48 @@ def informe(resultados, banco_test=None, coste_bps=10.0, horizonte=10, titulo="R
 # ============================================================================
 # EVALUACION CON META-LABELING: "cual elegir para acertar"
 # ============================================================================
+# estado global para los workers (se hereda por fork en Linux, sin copiar la memoria)
+_W = {}
+
+
+def _worker_init(mem, banco_sub):
+    _W["mem"] = mem
+    _W["banco"] = banco_sub
+
+
+def _worker_pred(i):
+    from .meta import features_meta, etiqueta_acierto
+    mem, banco_sub = _W["mem"], _W["banco"]
+    p = mem.predecir(banco_sub, i)
+    if p.abstencion and len(p.vecinos) == 0:
+        return None
+    yf = banco_sub.y.iloc[i].to_dict()
+    lado = 1 if p.prob_sube > 0.5 else -1
+    info = {"fecha": p.fecha, "ticker": p.ticker, "lado": lado, "prob": p.prob_sube,
+            "confianza": p.confianza, "tb_ret": yf.get("tb_ret", np.nan),
+            "tb_label": yf.get("tb_label", np.nan), "ret": yf.get("ret", np.nan),
+            "atr_pct": float(banco_sub.meta["atr_pct"].iloc[i]) if "atr_pct" in banco_sub.meta else np.nan,
+            "sector": banco_sub.meta["sector"].iloc[i] if "sector" in banco_sub.meta else "",
+            "patron": banco_sub.meta["patron"].iloc[i] if "patron" in banco_sub.meta else "",
+            "mkt_alcista": float(banco_sub.feat[i, banco_sub.nombres_feat.index("mkt_sobre_sma200")])
+            if "mkt_sobre_sma200" in banco_sub.nombres_feat else np.nan}
+    return (features_meta(p, banco_sub, i), etiqueta_acierto(p, yf), info, i)
+
+
+def _predicciones_paralelo(mem, banco_sub, n_procesos):
+    """Igual que _predicciones_con_features pero repartido entre procesos."""
+    import multiprocessing as mp
+    ctx = mp.get_context("fork")
+    with ctx.Pool(n_procesos, initializer=_worker_init, initargs=(mem, banco_sub)) as pool:
+        res = pool.map(_worker_pred, range(len(banco_sub)), chunksize=64)
+    filas_f, aciertos, info, idxs = [], [], [], []
+    for r in res:
+        if r is None:
+            continue
+        filas_f.append(r[0]); aciertos.append(r[1]); info.append(r[2]); idxs.append(r[3])
+    return filas_f, np.array(aciertos), pd.DataFrame(info), np.array(idxs, int)
+
+
 def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
     """Genera predicciones primarias + features del meta para un subconjunto.
 
@@ -316,7 +358,7 @@ def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
 
 
 def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
-                 umbral_meta=None, coste_bps=10.0, verbose=True, **kw_mem):
+                 umbral_meta=None, coste_bps=10.0, verbose=True, n_procesos=4, **kw_mem):
     """Walk-forward de dos etapas: memoria (primario) + meta-modelo (seleccion).
 
     Por cada pliegue de test:
@@ -349,7 +391,9 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         # 1-2) memoria pasado-lejano -> predicciones de validacion -> meta
         mem0 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem0))
         val = submuestreo_no_solapado(banco.subconjunto(m_val), max(1, cfg.horizonte // 2))
-        fval, aval, _, _ = _predicciones_con_features(mem0, val)
+        gen = (lambda m, b: _predicciones_paralelo(m, b, n_procesos)) if n_procesos > 1 \
+            else _predicciones_con_features
+        fval, aval, _, _ = gen(mem0, val)
         if len(aval) < 80 or len(np.unique(aval)) < 2:
             if verbose:
                 print(f"  pliegue {j}: validacion insuficiente, se salta")
@@ -362,7 +406,7 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         # 3) memoria con todo el pasado -> test -> seleccion por meta
         mem1 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem1))
         test = submuestreo_no_solapado(banco.subconjunto(m_test), paso_test)
-        ftest, atest, itest, idx_test = _predicciones_con_features(mem1, test)
+        ftest, atest, itest, idx_test = gen(mem1, test)
         if len(atest) < 10:
             continue
         itest["acierto_primario"] = atest

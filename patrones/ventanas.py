@@ -57,6 +57,7 @@ GRUPOS_ESCALARES = {
                       "fund_aceleracion_ingresos", "fund_sorpresa_tendencia"],
     "macro": ["macro_vix", "macro_vix_cambio", "macro_pendiente_curva",
               "macro_spread_credito", "macro_tendencia_tipos"],
+    "institucional": ["inst_presencia", "inst_peso", "inst_cambio", "inst_nuevo"],
 }
 NOMBRES_ESCALARES = [c for cols in GRUPOS_ESCALARES.values() for c in cols]
 
@@ -117,8 +118,9 @@ def rasgos_escalares(df, rasgos_contexto=None, rasgos_noticias=None, rasgos_extr
     rasgos_extra = rasgos_extra or {}
     fuentes = {"contexto": rasgos_contexto, "noticias": rasgos_noticias,
                "fundamentales": rasgos_extra.get("fundamentales"),
-               "macro": rasgos_extra.get("macro")}
-    for origen in ("contexto", "noticias", "fundamentales", "macro"):
+               "macro": rasgos_extra.get("macro"),
+               "institucional": rasgos_extra.get("institucional")}
+    for origen in ("contexto", "noticias", "fundamentales", "macro", "institucional"):
         fuente = fuentes[origen]
         for col in GRUPOS_ESCALARES[origen]:
             if fuente is not None and col in fuente.columns:
