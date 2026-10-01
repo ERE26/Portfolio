@@ -24,8 +24,11 @@ LIQUIDOS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVG
 #  - 1h: RVOL filtro, continuacion; R:R 1.5:1 en ATR.
 #  - 15m: mas ruidoso -> RVOL mas exigente; sin forzar cierre (el bracket decide).
 CONFIG = {
-    "1Hour": {"k_pt": 1.5, "k_sl": 1.0, "rvol_min": 1.1, "dias": 8},
-    "15Min": {"k_pt": 1.3, "k_sl": 0.9, "rvol_min": 1.3, "dias": 4},
+    # TP/SL validados (figura 28 / docs/estrategia_intradia_salidas.md): mayor
+    # reward:risk con SL AJUSTADO es mejor (dejar correr al ganador, cortar rapido
+    # al perdedor). Por eso TP ancho (~1.6-1.8 ATR) y SL corto (~0.8-0.9 ATR).
+    "1Hour": {"k_pt": 1.8, "k_sl": 0.9, "rvol_min": 1.1, "dias": 8},
+    "15Min": {"k_pt": 1.6, "k_sl": 0.8, "rvol_min": 1.3, "dias": 4},
 }
 
 

@@ -853,3 +853,20 @@ def test_bitacora_motivo_legible():
     m = B.describir_motivo({"rvol": 1.7, "dist_vwap": -0.004, "ret_sesion": 0.011,
                             "sent_noticias": -0.2}, conviccion=0.9)
     assert "RVOL 1.70" in m and "bajo VWAP" in m and "noticias negativas" in m
+
+
+def test_tiempos_entrada_desde_fills(monkeypatch):
+    """tiempos_entrada toma la ULTIMA compra por simbolo de los fills de Alpaca."""
+    import pandas as pd
+    import registro as R
+    fills = [
+        {"side": "buy", "symbol": "MU", "transaction_time": "2026-10-01T17:00:00Z"},
+        {"side": "buy", "symbol": "MU", "transaction_time": "2026-10-01T18:00:00Z"},  # mas reciente
+        {"side": "sell", "symbol": "MU", "transaction_time": "2026-10-01T18:30:00Z"},  # venta, ignora
+        {"side": "buy", "symbol": "JPM", "transaction_time": "2026-10-01T16:30:00Z"},
+    ]
+    monkeypatch.setattr(R, "_fills", lambda: fills)
+    te = R.tiempos_entrada()
+    assert set(te) == {"MU", "JPM"}
+    assert te["MU"] == pd.Timestamp("2026-10-01T18:00:00Z")   # la mas reciente, no la venta
+    assert te["JPM"] == pd.Timestamp("2026-10-01T16:30:00Z")

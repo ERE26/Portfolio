@@ -62,17 +62,33 @@ def señal(ticker, intervalo="15Min"):
             "atr_pct": atr / precio if precio else 0.0, "pend": pend, "bajo_vwap": bajo_vwap}
 
 
-def revisar_intradia():
-    """Re-analiza cada posicion intradia con las velas nuevas y decide si la
-    tendencia ha cambiado DE VERDAD (cerrar) o es una bajada organica (mantener).
+# TIME-STOP intradia: un setup intradia tiene VIDA UTIL CORTA. Mantener una
+# posicion horas pierde el edge original (el pico de RVOL y el momentum de VWAP se
+# disipan): ya no es la estrategia que la justifico, solo ocupa capital y riesgo.
+# Se cierra por tiempo para rotar a una oportunidad fresca.
+# Validado (figura 28): mantener mas tiempo NO mejora el EV/op, lo DEGRADA (el
+# setup decae). La operacion media se resuelve en ~1h; mas alla pierde el edge.
+MAX_VERDE_MIN = 90      # >=1.5h EN VERDE -> recoge el positivo y rota (no esperes a que se gire)
+MAX_DURA_MIN = 150      # >=2.5h -> time-stop duro: el setup ha caducado, cierra pase lo que pase
 
-    Cerrar solo si se CONFIRMA reversion: (a) sostenida por debajo del VWAP (3+ de
-    las ultimas 4 barras), (b) pendiente corta negativa y (c) claramente por debajo
-    del VWAP (>0.3%). Una sola barra roja o un roce del VWAP NO cierra: para eso
-    esta el stop-loss del bracket, que protege de una caida real."""
+
+def revisar_intradia():
+    """Re-analiza cada posicion intradia con las velas nuevas y decide si cerrar.
+
+    Cierra si (a) se CONFIRMA una reversion (sostenida bajo VWAP + pendiente baja +
+    claramente bajo VWAP), o (b) se dispara el TIME-STOP: lleva mucho tiempo abierta
+    (en verde >=2.5h -> recoge y rota; en cualquier caso >=3.5h -> caducada). Una
+    sola barra roja NO cierra (para eso esta el SL del bracket); mantener una
+    organica esta bien, pero mantenerla ETERNAMENTE pierde la estrategia intradia."""
     ordenes = AT.ordenes_abiertas()
     simbolos = sorted(set(o["symbol"] for o in ordenes))
     pos = AT.posiciones()
+    try:
+        from registro import tiempos_entrada
+        entradas = tiempos_entrada()
+    except Exception:
+        entradas = {}
+    ahora = pd.Timestamp.now(tz="UTC")
     out = []
     for t in simbolos:
         if t not in pos:
@@ -81,16 +97,34 @@ def revisar_intradia():
             s = señal(t, "15Min")
         except Exception:
             continue
+        # cuanto lleva abierta (minutos) y P&L %
+        mins = None
+        if t in entradas and pd.notna(entradas[t]):
+            mins = (ahora - entradas[t]).total_seconds() / 60.0
+        valor, pl = pos[t]["valor"], pos[t]["pl"]
+        pl_pct = pl / max(valor - pl, 1e-9)
         reversion = (s["bajo_vwap"] >= 0.75) and (s["pend"] < 0) and (s["dist_vwap"] < -0.003)
+        time_stop = False
+        if mins is not None:
+            if mins >= MAX_DURA_MIN:
+                time_stop = True
+            elif mins >= MAX_VERDE_MIN and pl_pct >= 0:
+                time_stop = True
+        cerrar = reversion or time_stop
         if reversion:
             motivo = "REVERSION confirmada (sostenida bajo VWAP + pendiente baja)"
+        elif time_stop and pl_pct >= 0 and (mins is None or mins < MAX_DURA_MIN):
+            motivo = f"TIME-STOP en verde ({mins:.0f} min): recoge +{pl_pct*100:.2f}% y rota"
+        elif time_stop:
+            motivo = f"TIME-STOP duro ({mins:.0f} min): el setup ha caducado"
         elif s["dist_vwap"] < 0 or s["ret_sesion"] < 0:
             motivo = "bajada organica (se mantiene; SL del bracket protege)"
         else:
             motivo = "tendencia intacta"
-        out.append({"ticker": t, "pl": pos[t]["pl"], "cerrar": reversion, "motivo": motivo,
+        out.append({"ticker": t, "pl": pl, "cerrar": cerrar, "motivo": motivo,
                     "dist_vwap": s["dist_vwap"], "ret_sesion": s["ret_sesion"],
-                    "rvol": s["rvol"], "pend": s["pend"], "bajo_vwap": s["bajo_vwap"]})
+                    "rvol": s["rvol"], "pend": s["pend"], "bajo_vwap": s["bajo_vwap"],
+                    "min_abierta": mins if mins is not None else float("nan")})
     return out
 
 

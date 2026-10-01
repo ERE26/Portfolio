@@ -158,6 +158,19 @@ def tickers_en_cooldown(minutos=60):
     return set(perd.loc[ts >= limite, "ticker"].astype(str))
 
 
+def tiempos_entrada():
+    """Hora de la ULTIMA compra por simbolo (proxy de la entrada de la posicion
+    abierta), desde los fills de Alpaca. Sirve para medir cuanto lleva abierta una
+    operacion intradia (para el time-stop)."""
+    buys = [f for f in _fills() if str(f.get("side", "")).startswith("buy")]
+    ult = {}
+    for f in buys:
+        t, ts = f.get("symbol"), f.get("transaction_time", "")
+        if t and ts and (t not in ult or ts > ult[t]):
+            ult[t] = ts
+    return {t: pd.to_datetime(ts, utc=True, errors="coerce") for t, ts in ult.items()}
+
+
 def memoria_por_ticker():
     """Historial REALIZADO por ticker: memoria persistente entre ciclos y dias.
 
