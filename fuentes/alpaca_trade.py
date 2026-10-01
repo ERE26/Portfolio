@@ -93,3 +93,34 @@ def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market"):
     r = requests.post(_url("orders"), json=cuerpo, headers=_headers(), timeout=30)
     r.raise_for_status()
     return r.json()
+
+
+def enviar_bracket(ticker, qty, tp_price, sl_price, lado="buy", confirmar=False):
+    """Orden BRACKET para intradia: entrada a mercado + take-profit (limit) y
+    stop-loss (stop). Alpaca gestiona la salida sola cuando se toca TP o SL.
+
+    tp_price/sl_price: precios de objetivo y stop. Con confirmar=False es dry-run.
+    """
+    qty = int(qty)
+    if qty <= 0:
+        return {"omitida": True, "ticker": ticker, "qty": qty}
+    cuerpo = {"symbol": ticker, "qty": str(qty), "side": lado, "type": "market",
+              "time_in_force": "day", "order_class": "bracket",
+              "take_profit": {"limit_price": round(float(tp_price), 2)},
+              "stop_loss": {"stop_price": round(float(sl_price), 2)}}
+    if not confirmar:
+        return {"dry_run": True, **cuerpo}
+    r = requests.post(_url("orders"), json=cuerpo, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def cerrar_todo(confirmar=False):
+    """Liquida todas las posiciones y cancela ordenes abiertas (para empezar
+    limpio o cerrar el dia). Con confirmar=False solo informa."""
+    pos = posiciones()
+    if not confirmar:
+        return {"dry_run": True, "cerraria": list(pos.keys())}
+    requests.delete(_url("orders"), headers=_headers(), timeout=30)
+    r = requests.delete(_url("positions"), headers=_headers(), timeout=30)
+    return {"cerradas": list(pos.keys()), "status": r.status_code}

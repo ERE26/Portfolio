@@ -50,13 +50,15 @@ def plan_rebalanceo(objetivo_dolar, precios_actuales, posiciones):
     return sorted(ordenes, key=lambda o: -o["dolar_aprox"])
 
 
-def ejecutar(enviar=False):
+def ejecutar(enviar=False, reserva_intradia=0.25):
     cta = AT.cuenta()
     equity = float(cta["equity"])
+    cap_swing = equity * (1.0 - reserva_intradia)
     print(f"Cuenta PAPER: equity ${equity:,.0f} | buying_power ${float(cta['buying_power']):,.0f} "
           f"| estado {cta['status']}")
+    print(f"Book SWING (momentum): ${cap_swing:,.0f}  ·  reserva intradia ${equity*reserva_intradia:,.0f}")
     precios, _ = cargar_mercado("datos/mercado", intervalo="1d")
-    objetivo, scores = objetivo_momentum(precios, equity)
+    objetivo, scores = objetivo_momentum(precios, cap_swing)
     pos = AT.posiciones()
     nombres = sorted(set(objetivo) | set(pos))
     px = AT.precio_actual(nombres)

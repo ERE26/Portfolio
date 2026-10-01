@@ -417,6 +417,10 @@ def test_alpaca_trade_seguridad_y_plan(monkeypatch):
     por_t = {o["ticker"]: o for o in ordenes}
     assert por_t["AAA"]["lado"] == "buy" and por_t["AAA"]["qty"] == 6   # 10 - 4
     assert por_t["BBB"]["lado"] == "buy" and por_t["BBB"]["qty"] == 10  # 10 - 0
+    # orden bracket intradia (dry-run): estructura correcta con TP/SL
+    br = AT.enviar_bracket("AAA", 10, tp_price=105.0, sl_price=98.0, confirmar=False)
+    assert br["dry_run"] and br["order_class"] == "bracket"
+    assert br["take_profit"]["limit_price"] == 105.0 and br["stop_loss"]["stop_price"] == 98.0
 
 
 def test_transversal_sin_lookahead_y_signo():
