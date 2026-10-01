@@ -141,8 +141,9 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     # con candidatos fuertes. Cubre tanto lo que cerramos por reversion como lo que
     # cerro solo el bracket al tocar TP/SL. Con cabeza: calidad > cantidad; si no hay
     # un candidato fuerte, se queda en efectivo (no operar por operar).
+    from registro import cargar_umbral, registrar_entrada
     N_OBJETIVO = 3
-    RVOL_FUERTE = 1.5
+    RVOL_FUERTE = cargar_umbral(1.5)      # umbral afinado por el aprendizaje (o 1.5 a priori)
     if gestionar and rotar:
         held = set(pos) - set(a_cerrar)
         intradia_vivas = len(rev) - len(a_cerrar)      # brackets que siguen abiertos
@@ -170,6 +171,16 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                     r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True)
                     if r.get("id"):
                         colocadas += 1
+                        # registrar la entrada con sus caracteristicas (para aprender)
+                        try:
+                            from fuentes import noticias_vivo
+                            sn = noticias_vivo.noticias(s["ticker"], n=3)["sentimiento"]
+                        except Exception:
+                            sn = 0.0
+                        registrar_entrada(s["ticker"], qty, precio, tp, sl,
+                                          {"rvol": s["rvol"], "dist_vwap": s["dist_vwap"],
+                                           "ret_sesion": s["ret_sesion"], "atr_pct": s["atr_pct"],
+                                           "sent_noticias": sn})
                         print(f"  LARGO {qty} {s['ticker']} @~${precio:.2f} -> TP ${tp} / SL ${sl}  OK")
                     else:
                         print(f"  {s['ticker']}: {r}")
