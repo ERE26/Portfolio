@@ -472,6 +472,165 @@ def leer_indicadores(feat, nombres, intra):
     return out
 
 
+# ============================================================= cartera demo (web)
+@st.cache_data(ttl=20, show_spinner=False)
+def _estado_cuenta():
+    from fuentes import alpaca_trade as AT
+    import requests
+    cta = AT.cuenta()
+    pos = AT.posiciones()
+    ordenes = AT.ordenes_abiertas()
+    try:
+        abierto = requests.get("https://paper-api.alpaca.markets/v2/clock",
+                               headers=AT._headers(), timeout=15).json().get("is_open")
+    except Exception:
+        abierto = None
+    return cta, pos, {o["symbol"] for o in ordenes}, abierto
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _reanalisis_intradia():
+    from gestionar import revisar_intradia
+    return revisar_intradia()
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _oportunidades():
+    from gestionar import escanear, escaneo_diario
+    from descubrir import candidatos_nuevos
+    intra = escanear("15Min")
+    nuevos = candidatos_nuevos(n=6)
+    diario = escaneo_diario(n=8)
+    return intra, nuevos, diario
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _noticias(ticker):
+    from fuentes import noticias_vivo
+    return noticias_vivo.noticias(ticker, n=5)
+
+
+def dashboard_cartera():
+    from fuentes import alpaca_trade as AT
+    st.subheader("💼 Cartera demo — Alpaca paper (en vivo)")
+    try:
+        cta, pos, sim_bracket, abierto = _estado_cuenta()
+    except Exception as e:
+        st.error(f"No pude conectar con la cuenta paper de Alpaca: {str(e)[:120]}")
+        st.info("Comprueba que `datos/.alpaca_key` tiene las claves paper (empiezan por PK).")
+        return
+    eq = float(cta["equity"]); cash = float(cta["cash"])
+    pl_dia = eq - float(cta.get("last_equity", eq))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Equity", f"${eq:,.0f}", f"{pl_dia:+,.0f} hoy")
+    c2.metric("Cash", f"${cash:,.0f}")
+    c3.metric("Invertido", f"${float(cta.get('long_market_value', 0)):,.0f}")
+    c4.metric("Mercado", "🟢 ABIERTO" if abierto else "🔴 cerrado")
+
+    # --- posiciones
+    filas = [{"Ticker": t, "Libro": "Intradía" if t in sim_bracket else "Swing",
+              "Acciones": int(v["qty"]), "Valor": v["valor"], "P&L": v["pl"]}
+             for t, v in pos.items()]
+    if filas:
+        dfp = pd.DataFrame(filas).sort_values(["Libro", "P&L"], ascending=[True, False])
+        st.markdown(f"**Posiciones ({len(filas)})** · Intradía: "
+                    f"{sum(1 for f in filas if f['Libro']=='Intradía')} · "
+                    f"Swing: {sum(1 for f in filas if f['Libro']=='Swing')}")
+        st.dataframe(dfp.style.format({"Valor": "${:,.0f}", "P&L": "${:+,.0f}"})
+                     .background_gradient(subset=["P&L"], cmap="RdYlGn"),
+                     use_container_width=True, hide_index=True, height=240)
+    else:
+        st.info("Sin posiciones abiertas.")
+
+    # --- controles para maniobrar
+    st.markdown("**Maniobrar**")
+    b1, b2, b3 = st.columns(3)
+    if b1.button("🔄 Gestión activa ahora", use_container_width=True):
+        with st.spinner("Re-analizando intradía y rotando…"):
+            from gestionar import main as gest
+            import io
+            import contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                gest(gestionar=True, rotar=True)
+            _estado_cuenta.clear(); _reanalisis_intradia.clear()
+        st.code(buf.getvalue() or "sin salida")
+    if b2.button("🧹 Cerrar intradía", use_container_width=True):
+        r = AT.cerrar_intradia(confirmar=True)
+        _estado_cuenta.clear()
+        st.success(f"Intradía cerrado: {r.get('cerradas', r)}")
+    cerrar_t = b3.selectbox("Cerrar posición", ["—"] + sorted(pos), key="cerrar_sel")
+    if b3.button("Cerrar la seleccionada", use_container_width=True) and cerrar_t != "—":
+        r = AT.cerrar_posiciones([cerrar_t], confirmar=True)
+        _estado_cuenta.clear()
+        st.success(f"Cerrada {cerrar_t}: {r.get('cerradas', r)}")
+
+    # --- re-analisis intradia (por que se mantiene o se cierra)
+    st.divider()
+    st.markdown("**Re-análisis intradía** (mantener bajada orgánica vs cerrar reversión confirmada)")
+    if st.button("Analizar posiciones intradía ahora"):
+        _reanalisis_intradia.clear()
+    try:
+        rev = _reanalisis_intradia()
+    except Exception as e:
+        rev = []
+        st.caption(f"(no se pudo analizar: {str(e)[:80]})")
+    if rev:
+        dr = pd.DataFrame([{"Ticker": d["ticker"], "P&L": d["pl"],
+                            "dist VWAP %": d["dist_vwap"] * 100, "pend %": d["pend"] * 100,
+                            "bajo VWAP %": d["bajo_vwap"] * 100,
+                            "Decisión": "🔴 CERRAR" if d["cerrar"] else "🟢 mantener",
+                            "Motivo": d["motivo"]} for d in rev])
+        st.dataframe(dr.style.format({"P&L": "${:+,.0f}", "dist VWAP %": "{:+.2f}",
+                                      "pend %": "{:+.3f}", "bajo VWAP %": "{:.0f}"}),
+                     use_container_width=True, hide_index=True)
+    else:
+        st.caption("Sin posiciones intradía con bracket ahora mismo.")
+
+    # --- oportunidades + noticias
+    st.divider()
+    st.markdown("**Oportunidades** (intradía, tickers nuevos y momentum diario)")
+    if st.button("📡 Buscar oportunidades + noticias"):
+        _oportunidades.clear()
+        with st.spinner("Escaneando universo ampliado, tickers nuevos y noticias…"):
+            intra, nuevos, diario = _oportunidades()
+        o1, o2 = st.columns(2)
+        with o1:
+            st.caption("Intradía (15m, universo ampliado)")
+            if len(intra):
+                st.dataframe(intra[["ticker", "dist_vwap", "rvol", "ret_sesion"]]
+                             .style.format({"dist_vwap": "{:+.3f}", "rvol": "{:.2f}",
+                                            "ret_sesion": "{:+.3f}"}),
+                             use_container_width=True, hide_index=True)
+            else:
+                st.caption("ninguna ahora")
+            st.caption("Tickers NUEVOS (no vistos) + noticias")
+            if len(nuevos):
+                cols = [c for c in ["ticker", "rvol", "ret_sesion", "tono", "sent_noticias"] if c in nuevos]
+                st.dataframe(nuevos[cols], use_container_width=True, hide_index=True)
+            else:
+                st.caption("ninguno ahora")
+        with o2:
+            st.caption("Top momentum diario (oportunidades swing)")
+            dd = pd.DataFrame({"ticker": diario.index, "momento %": diario.to_numpy() * 100})
+            dd["en cartera"] = dd["ticker"].isin(pos).map({True: "sí", False: ""})
+            st.dataframe(dd.style.format({"momento %": "{:+.1f}"}),
+                         use_container_width=True, hide_index=True)
+
+    # --- noticias de la cartera
+    st.divider()
+    st.markdown("**Noticias de la cartera**")
+    tsel = st.selectbox("Ver titulares de", ["—"] + sorted(pos), key="news_sel")
+    if tsel != "—":
+        nv = _noticias(tsel)
+        st.caption(f"Tono medio: {nv['etiqueta']} ({nv['sentimiento']:+.2f}) · {nv['n']} titulares")
+        for h in nv["titulares"]:
+            col = VER if h["punt"] > 0.1 else (ROJO if h["punt"] < -0.1 else GRIS)
+            st.markdown(f"<span style='color:{col}'>[{h['punt']:+.2f}]</span> {h['titular']} "
+                        f"<span style='color:{GRIS};font-size:0.8em'>· {h['fecha']} · {h['fuente']}</span>",
+                        unsafe_allow_html=True)
+
+
 # ======================================================================== app
 def main():
     st.set_page_config(page_title="Buscador de patrones", page_icon="📈", layout="wide")
@@ -481,6 +640,11 @@ def main():
                 unsafe_allow_html=True)
     st.caption("Metes varios tickers → encuentra momentos históricos parecidos, explica por qué, "
                "y predice. Herramienta de estudio, no es recomendación de inversión.")
+
+    vista = st.sidebar.radio("Vista", ["🔎 Buscador de patrones", "💼 Cartera demo (en vivo)"])
+    if vista.startswith("💼"):
+        dashboard_cartera()
+        return
 
     with st.sidebar:
         st.header("Configuración")
