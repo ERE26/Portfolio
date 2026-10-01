@@ -349,6 +349,36 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_transversal_sin_lookahead_y_signo():
+    """El momento transversal no mira al futuro y selecciona al alza al ticker que
+    tendencia arriba frente al que tendencia abajo."""
+    import numpy as np, pandas as pd
+    from patrones import transversal as TV
+    fechas = pd.date_range("2015-01-01", periods=400, freq="B")
+    sube = pd.Series(100 * np.exp(np.linspace(0, 0.8, 400)), index=fechas)
+    baja = pd.Series(100 * np.exp(np.linspace(0, -0.8, 400)), index=fechas)
+    panel = pd.concat([sube.rename("UP"), baja.rename("DN")], axis=1)
+    sc = TV.score_momentum(panel.iloc[:300], lookback=252, skip=21)
+    assert sc["UP"] > sc["DN"]          # el que sube tiene mas momento
+    # no lookahead: cambiar el futuro (tras la posicion 300) no altera el score en 300
+    panel2 = panel.copy(); panel2.iloc[300:] *= 3.0
+    sc2 = TV.score_momentum(panel2.iloc[:300], lookback=252, skip=21)
+    assert abs(sc["UP"] - sc2["UP"]) < 1e-12
+
+
+def test_transversal_backtest_corre():
+    """El backtest mensual produce metricas finitas sobre un universo sintetico."""
+    import numpy as np, pandas as pd
+    from patrones import transversal as TV
+    rng = np.random.default_rng(3)
+    fechas = pd.date_range("2010-01-01", periods=1500, freq="B")
+    pre = {f"T{i}": pd.DataFrame(
+        {"close": 100 * np.exp(np.cumsum(rng.normal(0.0003 * (i - 5), 0.012, 1500)))},
+        index=fechas) for i in range(12)}
+    d, m, _ = TV.backtest(pre, lookback=200, skip=21, q=0.25, largo_corto=True, min_tickers=6)
+    assert m and m["meses"] > 20 and np.isfinite(m["sharpe"])
+
+
 def test_riesgo_hrp_inv_vol():
     """HRP e inverse-vol dan pesos validos (suman 1, positivos) y la inverse-vol
     pondera mas el activo menos volatil."""

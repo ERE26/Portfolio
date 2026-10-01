@@ -618,6 +618,45 @@ con muchas posiciones concurrentes.
 Hoja de ruta completa de mejoras cuantitativas en
 [`docs/mejoras_quant.md`](docs/mejoras_quant.md).
 
+## Un segundo algoritmo: momentum transversal y combinación de alfas
+
+Para no depender de una sola idea se añadió un **segundo algoritmo quant
+independiente** (`patrones/transversal.py`): **cross-sectional momentum long-short**
+(Jegadeesh-Titman 1993, la base de los fondos cuantitativos). Cada mes compara
+TODOS los valores entre sí, se pone largo en los de más momento (12-1) y corto en
+los de menos, con rebalanceo mensual, costes por rotación y vol-targeting opcional.
+Se construye solo con precios y nunca mira al futuro.
+
+Resultados honestos (124 valores, 1990-2026):
+
+| Config momentum | Sharpe | Ret. anual | Max DD |
+|---|---|---|---|
+| Benchmark (equiponderado) | 0,81 | 11,5% | — |
+| Long-short (market-neutral) | 0,29 | 6,3% | −0,69 |
+| **Long-only + vol-target** | **0,93** | 10,9% | −0,33 |
+
+El **long-short market-neutral es débil** (bien documentado: la pata corta sufre en
+un mercado alcista secular), pero el **long-only bate al pasivo** (0,93 vs 0,81,
+DSR ≈ 1,0) y el vol-targeting reduce el drawdown a la mitad.
+
+Lo potente es combinarlo con el sistema de patrones, porque son **alfas
+descorreladas** (corr ≈ 0):
+
+![Momentum y combinación](figuras/24_momentum_combinacion.png)
+
+| Sobre el solape común | Sharpe |
+|---|---|
+| Patrones solo | 1,36 |
+| Momentum solo | 1,16 |
+| **Combinado (50/50 a igual riesgo)** | **1,76** |
+
+Combinar dos alfas independientes **sube el Sharpe por encima de cualquiera de las
+dos**: la diversificación de manual del quant trading, y la razón de tener un
+segundo algoritmo. (El solape del walk-forward de patrones con el histórico de
+momentum es corto, ~21 meses, así que la combinación es indicativa, no definitiva.)
+Esta estrategia transversal es, además, la natural para una **cartera demo**: da un
+objetivo de cartera mensual ejecutable.
+
 ## Uso
 
 ```bash
@@ -712,6 +751,7 @@ patrones/
   primario.py            modelos primarios: memoria, gradient boosting y ensamble
   sizing.py              dimensionado: Kelly fraccional y vol-targeting
   cartera.py             modelo de riesgo: Ledoit-Wolf, HRP, backtest de cartera
+  transversal.py         estrategia cross-sectional momentum (long-short) quant
   robustez.py            Deflated Sharpe Ratio y Probability of Backtest Overfitting
   intradia.py            indicadores intradia (VWAP, RVOL, hora, Corwin-Schultz)
   modelos.py             modelos supervisados de contraste (logística, GBM)

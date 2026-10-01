@@ -23,6 +23,12 @@ añadir confianza a las señales. Ordenado por retorno sobre esfuerzo.
 - ✅ **Paso 4 — Interfaz** (`app.py`): panel "por qué" (voto por familia de
   indicadores + ficha técnica), **ticker de Yahoo al vuelo**, **sectores fuertes
   resaltados** en la comparación, **export a CSV**, y branding TFG/CUNEF.
+- ✅ **Segundo algoritmo** (`transversal.py`): cross-sectional momentum long-short.
+  Long-short débil (Sharpe 0,29), long-only bate al pasivo (0,93, DSR ≈ 1,0). Clave:
+  descorrelado con el sistema de patrones (corr ≈ 0) → combinarlos sube el Sharpe a
+  **1,76** (vs 1,36 / 1,16). Base natural para la cartera demo.
+- ⬜ **Siguiente** — Combinar alfas de forma walk-forward (no solo sobre el solape),
+  cartera demo / paper trading, y depuración restante (pesos por unicidad, SHAP).
 
 ## 1. Dónde funciona hoy el sistema (datos propios)
 
