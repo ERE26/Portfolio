@@ -870,3 +870,47 @@ def test_tiempos_entrada_desde_fills(monkeypatch):
     assert set(te) == {"MU", "JPM"}
     assert te["MU"] == pd.Timestamp("2026-10-01T18:00:00Z")   # la mas reciente, no la venta
     assert te["JPM"] == pd.Timestamp("2026-10-01T16:30:00Z")
+
+
+def test_cooldown_fills_en_vivo(monkeypatch):
+    """El cooldown detecta un SL reciente DIRECTAMENTE de los fills de Alpaca,
+    aunque el CSV aun no se haya reconciliado (cierra el hueco de timing de NKE)."""
+    import pandas as pd
+    import registro as R
+    ahora = pd.Timestamp.now(tz="UTC")
+    fills = [
+        {"side": "buy",  "symbol": "NKE", "price": 36.06, "qty": 554,
+         "transaction_time": (ahora - pd.Timedelta(minutes=10)).isoformat()},
+        {"side": "sell", "symbol": "NKE", "price": 35.92, "qty": 554,   # venta a PERDIDA reciente
+         "transaction_time": (ahora - pd.Timedelta(minutes=8)).isoformat()},
+        {"side": "buy",  "symbol": "MU",  "price": 1000.0, "qty": 18,
+         "transaction_time": (ahora - pd.Timedelta(minutes=12)).isoformat()},
+        {"side": "sell", "symbol": "MU",  "price": 1010.0, "qty": 18,   # venta GANADORA
+         "transaction_time": (ahora - pd.Timedelta(minutes=9)).isoformat()},
+    ]
+    monkeypatch.setattr(R, "_fills", lambda: fills)
+    monkeypatch.setattr(R, "LOG", "/tmp/_no_existe_cooldown_test.csv")  # sin CSV reconciliado
+    cd = R.tickers_en_cooldown(minutos=60)
+    assert "NKE" in cd        # SL reciente detectado en vivo -> cooldown
+    assert "MU" not in cd     # salida ganadora -> no cooldown
+
+
+def test_conviccion_confluencia_rechaza_debiles(monkeypatch):
+    """La seleccion exige CONFLUENCIA: un candidato que solo cumple el minimo (RVOL)
+    pero falla en fuerza relativa, extension o sustancia de sesion se DESCARTA."""
+    import pandas as pd
+    import gestionar as G
+    monkeypatch.setattr(G, "_sentimiento", lambda t: 0.0)
+    opo = pd.DataFrame({
+        "ticker": ["FUERTE", "DEBIL_FR", "SOBREEXT", "SESION_BAJA"],
+        "rvol": [2.0, 2.0, 2.0, 2.0],                 # todos pasan el minimo de RVOL
+        "dist_vwap": [0.01, 0.01, 0.05, 0.01],
+        "ret_sesion": [0.012, 0.012, 0.012, 0.001],   # SESION_BAJA < 0.3%
+        "atr_pct": [0.01, 0.01, 0.01, 0.01],
+        "fuerza_rel": [0.008, 0.0005, 0.008, 0.008],  # DEBIL_FR no bate al mercado
+        "ext": [1.0, 1.0, 5.0, 1.0],                  # SOBREEXT estirado (>4 ATR)
+        "precio": [100.0] * 4,
+    })
+    r = G.rankear_conviccion(opo, umbral_fuerte=1.5)
+    t = list(r["ticker"])
+    assert t == ["FUERTE"]    # solo el que pasa las 6 confirmaciones

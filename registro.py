@@ -138,30 +138,71 @@ def analizar_selectividad():
     return out
 
 
+def _sl_recientes_fills(minutos=60):
+    """Simbolos con una VENTA A PERDIDA reciente, leida DIRECTAMENTE de los fills de
+    Alpaca (independiente de la reconciliacion del CSV). Cierra el hueco de timing:
+    aunque el SL aun no este reconciliado en el log, aqui se detecta al instante.
+
+    Reconstruye round-trips FIFO sobre los fills recientes: si una venta dentro de
+    la ventana salio por debajo de su compra emparejada, ese simbolo esta en cooldown."""
+    try:
+        fills = _fills()
+    except Exception:
+        return set()
+    from collections import deque, defaultdict
+    limite = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=minutos)
+    buys = defaultdict(deque)
+    sl = set()
+    for f in sorted(fills, key=lambda x: x.get("transaction_time", "")):
+        sym = f.get("symbol")
+        ts = pd.to_datetime(f.get("transaction_time"), utc=True, errors="coerce")
+        if not sym or pd.isna(ts):
+            continue
+        try:
+            px = float(f.get("price", 0) or 0); qty = float(f.get("qty", 0) or 0)
+        except Exception:
+            continue
+        if str(f.get("side", "")).startswith("buy"):
+            buys[sym].append([px, qty])
+        else:
+            q = qty
+            while q > 0 and buys[sym]:
+                bp, bq = buys[sym][0]; m = min(q, bq)
+                if ts >= limite and px < bp:          # venta reciente por debajo de la compra
+                    sl.add(str(sym))
+                bq -= m; q -= m
+                if bq <= 0:
+                    buys[sym].popleft()
+                else:
+                    buys[sym][0][1] = bq
+    return sl
+
+
 def tickers_en_cooldown(minutos=60):
     """Nombres que han tocado SL (perdida) hace poco: NO re-entrar enseguida.
 
     Un nombre que acaba de saltarte el stop suele estar en whipsaw (RVOL alto que
     revierte), no en tendencia limpia; recomprarlo porque 'la foto sigue guapa' es
-    el churn que pierde con costes. Mejor esperar a que se calme o demuestre fuerza
-    nueva. Usa la hora de salida real (salida_ts) y, si falta, la de entrada."""
-    if not os.path.exists(LOG):
-        return set()
-    try:
-        df = pd.read_csv(LOG)
-    except Exception:
-        return set()
-    if "resultado" not in df:
-        return set()
-    perd = df[df["resultado"] == "loss"].copy()
-    if len(perd) == 0:
-        return set()
-    cuando = perd.get("salida_ts")
-    ts = pd.to_datetime(cuando, errors="coerce", utc=True) if cuando is not None else pd.NaT
-    ent = pd.to_datetime(perd["ts"], errors="coerce", utc=True)
-    ts = ts.fillna(ent) if hasattr(ts, "fillna") else ent
-    limite = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=minutos)
-    return set(perd.loc[ts >= limite, "ticker"].astype(str))
+    el churn que pierde con costes. Combina DOS fuentes para no dejar hueco de timing:
+      (1) el log reconciliado (CSV), y
+      (2) los fills de Alpaca en vivo (_sl_recientes_fills), que detectan el SL al
+          instante aunque el CSV aun no se haya reconciliado este ciclo."""
+    cd = _sl_recientes_fills(minutos)        # fuente en vivo (sin depender del CSV)
+    if os.path.exists(LOG):
+        try:
+            df = pd.read_csv(LOG)
+            if "resultado" in df:
+                perd = df[df["resultado"] == "loss"].copy()
+                if len(perd):
+                    cuando = perd.get("salida_ts")
+                    ts = pd.to_datetime(cuando, errors="coerce", utc=True) if cuando is not None else pd.NaT
+                    ent = pd.to_datetime(perd["ts"], errors="coerce", utc=True)
+                    ts = ts.fillna(ent) if hasattr(ts, "fillna") else ent
+                    limite = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=minutos)
+                    cd |= set(perd.loc[ts >= limite, "ticker"].astype(str))
+        except Exception:
+            pass
+    return cd
 
 
 def tiempos_entrada():

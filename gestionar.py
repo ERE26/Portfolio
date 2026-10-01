@@ -21,11 +21,22 @@ from patrones import indicadores as ind
 from patrones.intradia import rasgos_intradia, rvol
 from operativa_intradia import CONFIG, LIQUIDOS
 
-# universo ampliado para buscar mas oportunidades (grandes + mas sectores)
+# universo ampliado: cuantos mas valores miremos, mas podemos ELEGIR los mejores
+# (el filtro de calidad decide, no el tamano del universo). Grandes + varios sectores.
 UNIVERSO = sorted(set(LIQUIDOS + [
     "ORCL", "CRM", "ADBE", "WFC", "C", "AXP", "V", "MA", "COP", "PFE", "MRK", "ABBV",
     "HD", "MCD", "NKE", "KO", "PEP", "PG", "WMT", "CAT", "BA", "DIA", "IWM", "XLK", "XLF",
-    "DE", "GE", "MU", "QCOM", "INTC", "T", "VZ", "DIS", "NFLX", "PYPL"]))
+    "DE", "GE", "MU", "QCOM", "INTC", "T", "VZ", "DIS", "NFLX", "PYPL",
+    # ampliacion: mas liquidos de tecnologia, semis, consumo, energia, salud, financieras
+    "SHOP", "PLTR", "SNOW", "CRWD", "PANW", "ANET", "SMCI", "ARM", "DELL", "TXN",
+    "LRCX", "KLAC", "ADI", "UBER", "COIN", "ABNB", "MAR", "BKNG", "SBUX", "LOW",
+    "TGT", "GM", "F", "GILD", "AMGN", "VRTX", "ISRG", "LMT", "RTX", "SLB",
+    "OXY", "PSX", "MPC", "FCX", "NEM", "XLE", "XLV", "XLY", "SMH", "QQQ"]))
+
+# Umbrales de CALIDAD para comprar (confluencia, no "el minimo"): ver abajo.
+EXT_MAX = 4.0          # no perseguir: como mucho 4 ATR por encima del VWAP
+MARGEN_FR = 0.002      # fuerza relativa: batir al mercado por >=0.2% hoy
+RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
 
 
 def universo_dinamico():
@@ -128,9 +139,27 @@ def revisar_intradia():
     return out
 
 
-def escanear(intervalo="15Min", excluir=(), n=6):
-    """Nuevas oportunidades intradia en el universo ampliado (no en cartera)."""
+def _ret_sesion_mercado(intervalo="15Min", benchmark="SPY"):
+    """Retorno de sesion del mercado (SPY) para medir la FUERZA RELATIVA de cada
+    valor. Un verdadero 'stock in play' BATE al mercado hoy, no solo sube con la
+    marea. Devuelve 0.0 si no se puede calcular."""
+    try:
+        cfg = CONFIG[intervalo]
+        desde = (pd.Timestamp.now() - pd.Timedelta(days=cfg["dias"])).strftime("%Y-%m-%d")
+        df = alpaca.historico(benchmark, intervalo, desde=desde, max_paginas=4)
+        from patrones.intradia import rasgos_intradia
+        return float(rasgos_intradia(df)["intra_ret_sesion"].iloc[-1])
+    except Exception:
+        return 0.0
+
+
+def escanear(intervalo="15Min", excluir=(), n=12):
+    """Nuevas oportunidades intradia en el universo ampliado (no en cartera).
+
+    Añade a cada candidato la FUERZA RELATIVA (vs el mercado) y la EXTENSION sobre
+    el VWAP en ATRs, para que la seleccion use mas indicadores que el RVOL."""
     cfg = CONFIG[intervalo]
+    mkt = _ret_sesion_mercado(intervalo)          # retorno del mercado hoy (SPY)
     filas = []
     for t in universo_dinamico():
         if t in excluir:
@@ -141,6 +170,8 @@ def escanear(intervalo="15Min", excluir=(), n=6):
             continue
         cand = (s["dist_vwap"] > 0) and (s["ret_sesion"] > 0) and (s["rvol"] >= cfg["rvol_min"])
         if cand:
+            s["fuerza_rel"] = s["ret_sesion"] - mkt                        # ¿bate al mercado?
+            s["ext"] = s["dist_vwap"] / s["atr_pct"] if s["atr_pct"] > 0 else 0.0  # ATRs sobre VWAP
             filas.append({"ticker": t, "score": s["rvol"] * s["ret_sesion"], **s})
     d = pd.DataFrame(filas)
     return d.sort_values("score", ascending=False).head(n).reset_index(drop=True) if len(d) else d
@@ -172,20 +203,36 @@ def _z(s):
     return (s - s.mean()) / sd if sd > 1e-9 else s * 0.0
 
 
-def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35):
-    """Ordena los candidatos FUERTES por un score de CONVICCION por confluencia y
-    aplica un GATE de catalizador (no comprar contra una noticia claramente mala).
+def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35,
+                       ext_max=EXT_MAX, margen_fr=MARGEN_FR, ret_min=RET_MIN):
+    """Elige SOLO las mejores por CONFLUENCIA: un candidato no entra por 'cumplir el
+    minimo', sino por pasar VARIAS confirmaciones independientes a la vez. Luego se
+    ordena por un score de conviccion y se opera el top (o efectivo si nada pasa).
 
-    conviccion = z(rvol) + z(ret_sesion) + 0.5*catalizador, con catalizador = el
-    sentimiento de noticias acotado a [-1, 1] (positivo suma, negativo resta). Si
-    el sentimiento es muy negativo (< gate_neg) el candidato se DESCARTA: un RVOL
-    alto con mala noticia suele ser ruido/trampa, no oportunidad. La evidencia es
-    clara (docs/aprendizaje_quant.md): ~95% del alfa esta en QUE eliges; las
-    noticias valen como filtro de 'razon real', no como senal direccional. Elegir
-    las mejores por confluencia es exactamente calidad > cantidad."""
+    GATES de calidad (todos obligatorios):
+      1. RVOL >= umbral fuerte        -> volumen anormal (stock in play)
+      2. sobre VWAP (dist_vwap > 0)   -> compradores al mando
+      3. NO sobre-extendido (ext<4)   -> no perseguir un valor ya estirado
+      4. FUERZA RELATIVA > +0.2%      -> bate al mercado hoy (no solo sube con la marea)
+      5. sesion del valor >= +0.3%    -> movimiento con sustancia
+      6. catalizador no muy negativo  -> no comprar contra una mala noticia
+
+    conviccion = z(rvol)+z(ret_sesion)+z(fuerza_rel)+0.5*catalizador+memoria.
+    La evidencia (docs/aprendizaje_quant.md, figura 26) es que el unico caso con edge
+    neto positivo es la CONFLUENCIA; un solo filtro no basta."""
     if opo is None or len(opo) == 0:
         return opo
     d = opo[(opo["rvol"] >= umbral_fuerte) & (~opo["ticker"].isin(set(excluir)))].copy()
+    # gates de calidad (confluencia) con los indicadores nuevos, si estan disponibles
+    if "dist_vwap" in d:
+        d = d[d["dist_vwap"] > 0]
+    if "ext" in d:
+        d = d[(d["ext"] > 0) & (d["ext"] < ext_max)]
+    if "fuerza_rel" in d:
+        d = d[d["fuerza_rel"] > margen_fr]
+    if "ret_sesion" in d:
+        d = d[d["ret_sesion"] >= ret_min]
+    d = d.copy()
     if len(d) == 0:
         return d
     d["sent"] = [_sentimiento(t) for t in d["ticker"]]
@@ -193,13 +240,12 @@ def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35):
     if len(d) == 0:
         return d
     cat = d["sent"].clip(-1, 1)
-    # MEMORIA por ticker: ajuste por el historial realizado (perdedores cronicos
-    # bajan, ganadores suben). Da memoria al selector entre ciclos, no solo la foto.
     from registro import ajuste_memoria
     aj = ajuste_memoria(list(d["ticker"]))
     d["mem"] = [aj.get(str(t), 0.0) for t in d["ticker"]]
+    fr = _z(d["fuerza_rel"]).to_numpy() if "fuerza_rel" in d else 0.0
     d["conviccion"] = (_z(d["rvol"]).to_numpy() + _z(d["ret_sesion"]).to_numpy()
-                       + 0.5 * cat.to_numpy() + d["mem"].to_numpy())
+                       + fr + 0.5 * cat.to_numpy() + d["mem"].to_numpy())
     return d.sort_values("conviccion", ascending=False).reset_index(drop=True)
 
 
@@ -233,19 +279,21 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     # con candidatos fuertes. Cubre tanto lo que cerramos por reversion como lo que
     # cerro solo el bracket al tocar TP/SL. Con cabeza: calidad > cantidad; si no hay
     # un candidato fuerte, se queda en efectivo (no operar por operar).
-    from registro import cargar_umbral, registrar_entrada, tickers_en_cooldown
+    from registro import cargar_umbral, registrar_entrada, tickers_en_cooldown, reconciliar
     N_OBJETIVO = 3
     RVOL_FUERTE = cargar_umbral(1.5)      # umbral afinado por el aprendizaje (o 1.5 a priori)
     if gestionar and rotar:
+        reconciliar()      # marca YA los SL recientes en el log ANTES de mirar el cooldown
         held = set(pos) - set(a_cerrar)
-        # cooldown: no re-entrar en un nombre que acaba de tocar SL (evita el churn
-        # de comprar-perder-recomprar en un whipsaw; con cabeza > foto bonita).
-        cooldown = tickers_en_cooldown(minutos=60)
+        # cooldown = (log reconciliado + fills en vivo) U lo que acabamos de cerrar
+        # este ciclo. Nunca re-comprar un nombre que acaba de saltar el SL ni el que
+        # cerramos ahora mismo: asi NO se repite el churn de NKE (re-buy a los 3 min).
+        cooldown = tickers_en_cooldown(minutos=60) | set(a_cerrar)
         if cooldown:
-            print(f"\nEn cooldown tras SL (no re-entrar aun): {sorted(cooldown)}")
+            print(f"\nEn cooldown (no re-entrar aun): {sorted(cooldown)}")
         intradia_vivas = len(rev) - len(a_cerrar)      # brackets que siguen abiertos
         libres = max(N_OBJETIVO - intradia_vivas, 0)
-        # ranking por CONVICCION (confluencia) + gate de catalizador de noticias
+        # CONFLUENCIA: solo pasan los que cumplen VARIAS confirmaciones (no el minimo)
         fuertes = rankear_conviccion(opo, RVOL_FUERTE, excluir=held | cooldown)
         if libres and len(fuertes):
             cfg = CONFIG["15Min"]
@@ -254,8 +302,8 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
             # mas candidatos de los huecos, por si alguno falla; TP/SL con el precio ACTUAL
             abrir = fuertes.head(libres + 3)
             px_now = AT.precio_actual(list(abrir["ticker"]))
-            print(f"\nReinvirtiendo (hasta {libres}) por CONVICCION (RVOL>={RVOL_FUERTE} "
-                  f"+ gate de noticias):")
+            print(f"\nReinvirtiendo (hasta {libres}) por CONFLUENCIA de calidad "
+                  f"(RVOL + VWAP + fuerza relativa + catalizador, no por el minimo):")
             colocadas = 0
             for _, s in abrir.iterrows():
                 if colocadas >= libres:
@@ -301,8 +349,8 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                 except Exception as e:
                     print(f"  {s['ticker']}: salto ({str(e)[:50]})")
         elif libres:
-            print(f"\n{libres} hueco(s) intradia libre(s), pero sin candidato fuerte "
-                  f"(RVOL>={RVOL_FUERTE}): se mantiene el efectivo (calidad > cantidad).")
+            print(f"\n{libres} hueco(s) libre(s), pero NINGUN candidato pasa la "
+                  f"confluencia de calidad: EFECTIVO (mejor no operar que operar mal).")
 
     print("\nTOP MOMENTUM DIARIO (oportunidades swing):")
     for t, m in escaneo_diario().items():
