@@ -632,8 +632,21 @@ def dashboard_cartera():
 
 
 # ======================================================================== app
+def _secrets_a_env():
+    """Pasa las claves de los Secrets del hosting (Streamlit Cloud, etc.) a variables
+    de entorno, para que los conectores (Alpaca, FRED) funcionen desplegados."""
+    import os
+    try:
+        for k in ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "FRED_API_KEY"):
+            if k in st.secrets and not os.environ.get(k):
+                os.environ[k] = str(st.secrets[k])
+    except Exception:
+        pass
+
+
 def main():
     st.set_page_config(page_title="Buscador de patrones", page_icon="📈", layout="wide")
+    _secrets_a_env()
     st.markdown(f"<h1 style='margin-bottom:0'>📈 Buscador de patrones de trading</h1>"
                 f"<p style='color:{GRIS};margin-top:2px'>Trabajo de Fin de Grado · CUNEF Universidad"
                 f"  ·  sistema de aprendizaje de patrones con validación walk-forward</p>",
