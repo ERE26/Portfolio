@@ -14,7 +14,12 @@ añadir confianza a las señales. Ordenado por retorno sobre esfuerzo.
 - ✅ **Paso 2 — Dimensionado** (`sizing.py`): Kelly fraccional y sizing por
   confianza (Sharpe 1,21→1,24, PF 1,67→1,76); vol-targeting y filtro de sector
   disponibles pero el reality-check los descartó (sobreajuste).
-- ⬜ **Paso 3 — Pipeline quant** (riesgo Ledoit-Wolf/HRP, ensemble de horizontes).
+- ✅ **Paso 3 — Modelo de riesgo y ensemble** (`cartera.py`): Ledoit-Wolf, HRP,
+  inverse-vol y backtest de cartera por cohortes; ensemble de horizontes de salida.
+  Resultado HONESTO: **no mejoran este sistema** (equiponderado 1,99 > inverse-vol
+  1,54 > HRP 1,02; ensemble neutro). Razón: el sistema es selectivo y rara vez
+  tiene muchas posiciones correladas abiertas a la vez, así que la covarianza solo
+  añade ruido. Los módulos quedan para sistemas con muchas posiciones concurrentes.
 - ⬜ **Paso 4 — Interfaz** (calibración visible, Yahoo al vuelo, branding, export).
 
 ## 1. Dónde funciona hoy el sistema (datos propios)

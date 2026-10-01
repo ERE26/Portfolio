@@ -148,6 +148,7 @@ REGLAS_SISTEMA = {
     "kelly_fraccion": 0.25,     # fraccion de Kelly si sizing='kelly'
     "vol_objetivo": None,       # ATR% de referencia para escalar inverso a la volatilidad
     "solo_sectores": None,      # lista de sectores a operar (p.ej. ciclicos); None = todos
+    "caps_horizonte": None,     # ensemble: lista de horizontes de salida a promediar (p.ej. [5,10,15])
 }
 
 
@@ -165,7 +166,15 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
     # de la sesion. Requiere la columna 'barras_hasta_cierre' (banco intradia).
     cap = d["barras_hasta_cierre"].to_numpy() if (
         r.get("salida_cierre") and "barras_hasta_cierre" in d) else None
-    d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=cap) - coste_atr
+    if r.get("caps_horizonte"):
+        # ensemble de horizontes de salida: promedia el resultado a varios
+        # horizontes (menos dependencia del timing exacto de salida).
+        n = len(d)
+        rets = [etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=np.full(n, c))
+                for c in r["caps_horizonte"]]
+        d["ret_op"] = np.mean(rets, axis=0) - coste_atr
+    else:
+        d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=cap) - coste_atr
     vol = pd.Series([np.max(h) - np.min(l) for h, l in zip(d["cam_high"], d["cam_low"])],
                     index=d.index)
     vol_alta = pd.qcut(vol.rank(method="first"), 3, labels=["baja", "media", "alta"]) != "baja"

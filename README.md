@@ -598,6 +598,20 @@ El sistema **no está sobreajustado**. El mismo test descartó honestamente una
 combinación "todo junto" (Kelly + vol-targeting + filtro de sector) que daba DSR
 0,89 y PBO 0,63: estaba sobreajustada, y las métricas lo detectaron.
 
+**3. Modelo de riesgo de cartera (y por qué aquí no ayuda).** Se implementó un
+modelo de riesgo completo (`patrones/cartera.py`): covarianza con **shrinkage de
+Ledoit-Wolf**, **Hierarchical Risk Parity** (HRP, López de Prado 2016) e
+inverse-vol, con un backtest de cartera que pondera por riesgo las operaciones
+concurrentes. Resultado honesto: en este sistema **el equiponderado gana**
+(Sharpe 1,99 vs 1,54 inverse-vol vs 1,02 HRP), y el **ensemble de horizontes** de
+salida es neutro. La razón es instructiva: el sistema es selectivo y casi nunca
+tiene muchas posiciones correladas abiertas a la vez, así que estimar su
+covarianza solo añade ruido. No toda técnica quant mejora todo sistema; medirlo
+—en vez de asumirlo— es parte del rigor. Los módulos quedan listos para un sistema
+con muchas posiciones concurrentes.
+
+![Modelo de riesgo y ensemble](figuras/23_cartera_ensemble.png)
+
 Hoja de ruta completa de mejoras cuantitativas en
 [`docs/mejoras_quant.md`](docs/mejoras_quant.md).
 
@@ -693,6 +707,9 @@ patrones/
   rentabilidad.py        barreras asimétricas, edge por segmento, reglas del sistema
   factores.py            normalización cross-sectional de factores (estilo AQR)
   primario.py            modelos primarios: memoria, gradient boosting y ensamble
+  sizing.py              dimensionado: Kelly fraccional y vol-targeting
+  cartera.py             modelo de riesgo: Ledoit-Wolf, HRP, backtest de cartera
+  robustez.py            Deflated Sharpe Ratio y Probability of Backtest Overfitting
   intradia.py            indicadores intradia (VWAP, RVOL, hora, Corwin-Schultz)
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas

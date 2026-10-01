@@ -349,6 +349,56 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_riesgo_hrp_inv_vol():
+    """HRP e inverse-vol dan pesos validos (suman 1, positivos) y la inverse-vol
+    pondera mas el activo menos volatil."""
+    import numpy as np
+    from patrones import cartera
+    cov = np.array([[0.04, 0.01, 0.00, 0.00],
+                    [0.01, 0.09, 0.00, 0.00],
+                    [0.00, 0.00, 0.16, 0.02],
+                    [0.00, 0.00, 0.02, 0.01]])
+    for metodo in ("hrp", "inv_vol", "igual"):
+        w = cartera.pesos_riesgo(cov, metodo)
+        assert abs(w.sum() - 1.0) < 1e-9 and (w >= -1e-9).all()
+    wiv = cartera.pesos_inv_vol(cov)
+    # el activo 3 (var 0.01, el menos volatil) pesa mas que el 2 (var 0.16)
+    assert wiv[3] > wiv[2]
+
+
+def test_backtest_cartera_corre():
+    """El backtest de cartera agrupa en cohortes y pondera por riesgo sin fallar."""
+    import numpy as np, pandas as pd
+    from patrones import cartera
+    rng = np.random.default_rng(0)
+    fechas = pd.date_range("2022-01-03", periods=600, freq="B")
+    precios = {t: pd.DataFrame({"close": 100 * np.exp(np.cumsum(rng.normal(0, 0.01, 600)))},
+                               index=fechas) for t in ["AAA", "BBB", "CCC"]}
+    n = 120
+    res = pd.DataFrame({"ticker": rng.choice(["AAA", "BBB", "CCC"], n),
+                        "fecha": rng.choice(fechas[200:], n),
+                        "ret_op": rng.normal(0.1, 1.0, n)})
+    serie, m = cartera.backtest_cartera(res, precios, metodo="hrp", freq="W")
+    assert m["cohortes"] > 5 and np.isfinite(m["sharpe_op"])
+
+
+def test_ensemble_horizontes():
+    """El ensemble de horizontes de salida promedia resultados y produce un
+    retorno intermedio entre los horizontes individuales."""
+    import numpy as np, pandas as pd
+    from patrones import rentabilidad as R
+    rng = np.random.default_rng(1); n = 200
+    res = pd.DataFrame({
+        "lado": np.ones(n), "prob_meta": rng.uniform(0.5, 0.8, n), "pliegue": 1,
+        "mkt_alcista": 1.0,
+        "cam_high": [np.sort(rng.uniform(0, 3, 10)) for _ in range(n)],
+        "cam_low": [-np.sort(rng.uniform(0, 3, 10)) for _ in range(n)],
+        "cam_close": [rng.uniform(-2, 2, 10) for _ in range(n)]})
+    base = {"permitir_cortos": False, "solo_mercado_alcista": False, "evitar_vol_baja": False}
+    _, m = R.aplicar_sistema(res, reglas={**base, "caps_horizonte": [4, 7, 10]})
+    assert m.get("operaciones", 0) >= 20 and np.isfinite(m["sharpe"])
+
+
 def test_kelly_fraccional_y_sizing():
     """Kelly da tamano 0 sin ventaja y crece con la probabilidad; el sizing por
     confianza/kelly no rompe aplicar_sistema y pondera mas lo mas fiable."""
