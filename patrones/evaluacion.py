@@ -365,7 +365,7 @@ def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
 
 def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
                  umbral_meta=None, coste_bps=10.0, verbose=True, n_procesos=4,
-                 primario="memoria", **kw_mem):
+                 primario="memoria", calibrar_meta=True, **kw_mem):
     """Walk-forward de dos etapas: memoria (primario) + meta-modelo (seleccion).
 
     Por cada pliegue de test:
@@ -409,7 +409,7 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         wval = pesos_unicidad(val.meta["fecha"].to_numpy("datetime64[ns]").astype("datetime64[D]")
                               .astype(np.int64)[:len(aval)], np.full(len(aval), cfg.horizonte),
                               cfg.horizonte) if len(aval) else None
-        meta = MetaModelo().entrenar(fval, aval, pesos=wval)
+        meta = MetaModelo().entrenar(fval, aval, pesos=wval, calibrar=calibrar_meta)
 
         # 3) primario con todo el pasado -> test -> seleccion por meta
         mem1 = crear_primario(primario, cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem1))

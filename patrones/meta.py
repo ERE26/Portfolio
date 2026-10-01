@@ -93,21 +93,48 @@ class MetaModelo:
         self.cols = None
         self.semilla = semilla
 
-    def entrenar(self, filas_features, aciertos, pesos=None):
+    def _nuevo_gbm(self):
         from sklearn.ensemble import HistGradientBoostingClassifier
-        X = pd.DataFrame(filas_features).fillna(0.0)
-        self.cols = list(X.columns)
-        y = np.asarray(aciertos, int)
-        self.modelo = HistGradientBoostingClassifier(
+        return HistGradientBoostingClassifier(
             max_depth=3, learning_rate=0.05, max_iter=300, l2_regularization=1.0,
             min_samples_leaf=30, early_stopping=True, validation_fraction=0.15,
             random_state=self.semilla)
-        self.modelo.fit(X.to_numpy(), y, sample_weight=pesos)
+
+    def entrenar(self, filas_features, aciertos, pesos=None, calibrar=True):
+        """Entrena el meta y, si calibrar, ajusta una calibracion ISOTONICA de su
+        probabilidad para que "0.70" signifique 70% de acierto real.
+
+        La calibracion se aprende con predicciones out-of-fold (3-fold) para no
+        mirar los mismos datos que entrenan el GBM. Es monotona, asi que NO cambia
+        el ranking (ni el AUC): arregla el eje de probabilidad, que es lo que
+        alimenta el sizing y la confianza mostrada.
+        """
+        X = pd.DataFrame(filas_features).fillna(0.0)
+        self.cols = list(X.columns)
+        y = np.asarray(aciertos, int)
+        Xv = X.to_numpy()
+        self.modelo = self._nuevo_gbm().fit(Xv, y, sample_weight=pesos)
+        self.calibrador = None
+        if calibrar and len(np.unique(y)) == 2 and len(y) >= 200:
+            from sklearn.isotonic import IsotonicRegression
+            from sklearn.model_selection import StratifiedKFold
+            oof = np.full(len(y), np.nan)
+            skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=self.semilla)
+            for tr, va in skf.split(Xv, y):
+                w = None if pesos is None else np.asarray(pesos)[tr]
+                m = self._nuevo_gbm().fit(Xv[tr], y[tr], sample_weight=w)
+                oof[va] = m.predict_proba(Xv[va])[:, 1]
+            ok = np.isfinite(oof)
+            if len(np.unique(y[ok])) == 2:
+                self.calibrador = IsotonicRegression(out_of_bounds="clip").fit(oof[ok], y[ok])
         return self
 
     def prob_acierto(self, filas_features):
         X = pd.DataFrame(filas_features).reindex(columns=self.cols).fillna(0.0)
-        return self.modelo.predict_proba(X.to_numpy())[:, 1]
+        p = self.modelo.predict_proba(X.to_numpy())[:, 1]
+        if getattr(self, "calibrador", None) is not None:
+            p = self.calibrador.predict(p)
+        return np.asarray(p, float)
 
     def importancias(self, filas_features, aciertos, n=12):
         from sklearn.inspection import permutation_importance

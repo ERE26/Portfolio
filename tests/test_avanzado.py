@@ -349,6 +349,58 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_deflated_sharpe_penaliza_pruebas():
+    """A mas pruebas realizadas, mas alto el listón y menor el DSR del mismo
+    backtest: el DSR castiga el multiple-testing."""
+    import numpy as np
+    from patrones import robustez
+    rng = np.random.default_rng(0)
+    r = rng.normal(0.05, 1.0, 400)          # retornos de la estrategia elegida
+    trials = rng.normal(0, 0.1, 50)         # Sharpes de las pruebas
+    dsr_pocas = robustez.deflated_sharpe_ratio(r, trials[:3])
+    dsr_muchas = robustez.deflated_sharpe_ratio(r, np.r_[trials, rng.normal(0, 0.1, 500)])
+    assert 0 <= dsr_muchas <= 1 and 0 <= dsr_pocas <= 1
+    assert dsr_muchas <= dsr_pocas + 1e-9
+
+
+def test_pbo_detecta_sobreajuste():
+    """PBO alto cuando las 'estrategias' son ruido puro (el mejor IS es aleatorio
+    OOS); bajo cuando una estrategia domina de forma consistente."""
+    import numpy as np
+    from patrones import robustez
+    rng = np.random.default_rng(1)
+    T, N = 240, 20
+    ruido = rng.normal(0, 1, (T, N))        # ninguna es mejor de verdad
+    pbo_ruido = robustez.probabilidad_sobreajuste(ruido, S=10)
+    dominante = rng.normal(0, 1, (T, N))
+    dominante[:, 0] += 0.8                   # la columna 0 es genuinamente buena
+    pbo_bueno = robustez.probabilidad_sobreajuste(dominante, S=10)
+    assert 0 <= pbo_ruido <= 1 and 0 <= pbo_bueno <= 1
+    assert pbo_ruido > pbo_bueno
+    assert pbo_bueno < 0.3
+
+
+def test_meta_calibracion_monotona_y_en_rango():
+    """La calibracion isotonica del meta mantiene el ranking (AUC) y deja las
+    probabilidades en [0,1]."""
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+    from patrones.meta import MetaModelo
+    rng = np.random.default_rng(2)
+    n = 800
+    x = rng.normal(0, 1, n)
+    y = (rng.random(n) < 1 / (1 + np.exp(-x))).astype(int)   # señal real
+    filas = [{"a": float(xi), "b": float(rng.normal())} for xi in x]
+    m = MetaModelo().entrenar(filas, y, calibrar=True)
+    assert m.calibrador is not None
+    p = m.prob_acierto(filas)
+    assert p.min() >= 0 and p.max() <= 1
+    # misma capacidad de ordenar (la isotonica es monotona)
+    m0 = MetaModelo().entrenar(filas, y, calibrar=False)
+    p0 = m0.prob_acierto(filas)
+    assert abs(roc_auc_score(y, p) - roc_auc_score(y, p0)) < 0.02
+
+
 def test_filtro_rvol_y_eod_en_aplicar_sistema():
     """aplicar_sistema respeta el filtro RVOL y la salida al cierre cuando el
     banco trae las columnas intradia; sin ellas, el sistema diario no cambia."""
