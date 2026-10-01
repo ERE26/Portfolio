@@ -27,8 +27,15 @@ añadir confianza a las señales. Ordenado por retorno sobre esfuerzo.
   Long-short débil (Sharpe 0,29), long-only bate al pasivo (0,93, DSR ≈ 1,0). Clave:
   descorrelado con el sistema de patrones (corr ≈ 0) → combinarlos sube el Sharpe a
   **1,76** (vs 1,36 / 1,16). Base natural para la cartera demo.
-- ⬜ **Siguiente** — Combinar alfas de forma walk-forward (no solo sobre el solape),
-  cartera demo / paper trading, y depuración restante (pesos por unicidad, SHAP).
+- ✅ **Combinación walk-forward de alfas** (`asignador.py`): reparte capital entre
+  patrones y momentum mes a mes con pesos solo del pasado. Combinado 1,64 (vs 1,42
+  patrones / 1,16 momentum), DSR ≈ 1,0. Figura 25.
+- ✅ **Depuración de decisión**: (a) auditoría de purga/embargo → correctos, sin
+  fuga; (b) arreglo del desalineo de pesos de unicidad del meta; (c) filtro de
+  **convicción del primario** (operar solo señales decididas) → Sharpe 0,74→1,03
+  (banco débil) / 1,21→1,23 (fuerte), DSR ≈ 1,0.
+- ⬜ **Siguiente** — Cartera demo / paper trading (Alpaca), y SHAP para pesar la
+  métrica del k-NN.
 
 ## 1. Dónde funciona hoy el sistema (datos propios)
 

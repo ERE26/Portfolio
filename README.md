@@ -644,18 +644,26 @@ descorreladas** (corr ≈ 0):
 
 ![Momentum y combinación](figuras/24_momentum_combinacion.png)
 
+**Combinación walk-forward** (`patrones/asignador.py`): un asignador reparte el
+capital entre las dos alfas **mes a mes**, con pesos fijados usando **solo el pasado**
+(volatilidad y correlación recientes), sin look-ahead. Cada alfa se lleva a riesgo
+comparable (vol-targeting trailing). Sobre el solape común (43 meses, 2011-2026):
+
+![Combinación walk-forward](figuras/25_combinacion_walkforward.png)
+
 | Sobre el solape común | Sharpe |
 |---|---|
-| Patrones solo | 1,36 |
+| Patrones solo | 1,42 |
 | Momentum solo | 1,16 |
-| **Combinado (50/50 a igual riesgo)** | **1,76** |
+| 50/50 estático (ideal) | 1,70 |
+| **Combinado walk-forward** | **1,64** (DSR ≈ 1,0) |
 
 Combinar dos alfas independientes **sube el Sharpe por encima de cualquiera de las
-dos**: la diversificación de manual del quant trading, y la razón de tener un
-segundo algoritmo. (El solape del walk-forward de patrones con el histórico de
-momentum es corto, ~21 meses, así que la combinación es indicativa, no definitiva.)
-Esta estrategia transversal es, además, la natural para una **cartera demo**: da un
-objetivo de cartera mensual ejecutable.
+dos**, incluso con la asignación realista (walk-forward), que queda apenas por
+debajo del 50/50 estático (el coste honesto de no mirar al futuro). Es la
+diversificación de manual del quant trading, y la razón de tener un segundo
+algoritmo. Esta estrategia transversal es, además, la natural para una **cartera
+demo**: da un objetivo de cartera mensual ejecutable.
 
 ## Uso
 
@@ -752,6 +760,7 @@ patrones/
   sizing.py              dimensionado: Kelly fraccional y vol-targeting
   cartera.py             modelo de riesgo: Ledoit-Wolf, HRP, backtest de cartera
   transversal.py         estrategia cross-sectional momentum (long-short) quant
+  asignador.py           combina varias alfas en cartera, walk-forward (sin look-ahead)
   robustez.py            Deflated Sharpe Ratio y Probability of Backtest Overfitting
   intradia.py            indicadores intradia (VWAP, RVOL, hora, Corwin-Schultz)
   modelos.py             modelos supervisados de contraste (logística, GBM)
