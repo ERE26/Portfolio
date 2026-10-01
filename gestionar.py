@@ -28,6 +28,17 @@ UNIVERSO = sorted(set(LIQUIDOS + [
     "DE", "GE", "MU", "QCOM", "INTC", "T", "VZ", "DIS", "NFLX", "PYPL"]))
 
 
+def universo_dinamico():
+    """Universo operable = la lista base MAS los descubrimientos recientes de la
+    watchlist. Asi el radar crece y rota en vez de mirar siempre los mismos nombres."""
+    try:
+        from descubrir import watchlist_vigente
+        extra = watchlist_vigente()
+    except Exception:
+        extra = []
+    return sorted(set(UNIVERSO) | set(extra))
+
+
 def señal(ticker, intervalo="15Min"):
     """Re-analiza un ticker con las velas nuevas. Devuelve indicadores actuales Y
     señales de TENDENCIA (sostenidas), para distinguir una reversion real de una
@@ -87,7 +98,7 @@ def escanear(intervalo="15Min", excluir=(), n=6):
     """Nuevas oportunidades intradia en el universo ampliado (no en cartera)."""
     cfg = CONFIG[intervalo]
     filas = []
-    for t in UNIVERSO:
+    for t in universo_dinamico():
         if t in excluir:
             continue
         try:
@@ -148,7 +159,13 @@ def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35):
     if len(d) == 0:
         return d
     cat = d["sent"].clip(-1, 1)
-    d["conviccion"] = _z(d["rvol"]).to_numpy() + _z(d["ret_sesion"]).to_numpy() + 0.5 * cat.to_numpy()
+    # MEMORIA por ticker: ajuste por el historial realizado (perdedores cronicos
+    # bajan, ganadores suben). Da memoria al selector entre ciclos, no solo la foto.
+    from registro import ajuste_memoria
+    aj = ajuste_memoria(list(d["ticker"]))
+    d["mem"] = [aj.get(str(t), 0.0) for t in d["ticker"]]
+    d["conviccion"] = (_z(d["rvol"]).to_numpy() + _z(d["ret_sesion"]).to_numpy()
+                       + 0.5 * cat.to_numpy() + d["mem"].to_numpy())
     return d.sort_values("conviccion", ascending=False).reset_index(drop=True)
 
 

@@ -4,6 +4,8 @@ ciclos de gestion para ampliar el radar sin tocar la cartera.
 
 Uso:  python descubrir.py
 """
+import json
+import os
 import sys
 
 import numpy as np
@@ -14,6 +16,43 @@ from patrones import indicadores as ind
 from patrones.intradia import rasgos_intradia, rvol
 from operativa_intradia import LIQUIDOS
 from gestionar import UNIVERSO
+
+WATCHLIST = "datos/watchlist.json"
+
+
+def _cargar_watchlist(dias=3):
+    """Lee la watchlist persistente y purga lo mas viejo de 'dias'."""
+    try:
+        wl = json.load(open(WATCHLIST))
+    except Exception:
+        return {}
+    ahora = pd.Timestamp.now()
+    return {t: ts for t, ts in wl.items()
+            if (ahora - pd.Timestamp(ts)) <= pd.Timedelta(days=dias)}
+
+
+def watchlist_vigente(dias=3):
+    """Tickers descubiertos recientemente (para que el radar crezca y rote, en vez
+    de mirar siempre la misma lista fija)."""
+    return sorted(_cargar_watchlist(dias).keys())
+
+
+def guardar_en_watchlist(d, rvol_min=1.5, sent_min=-0.1, dias=3):
+    """Apunta en la watchlist los descubrimientos PROMETEDORES (RVOL fuerte y sin
+    noticia claramente negativa). Devuelve los nombres nuevos anotados."""
+    wl = _cargar_watchlist(dias)
+    if d is None or len(d) == 0:
+        json.dump(wl, open(WATCHLIST, "w")); return []
+    os.makedirs("datos", exist_ok=True)
+    ahora = pd.Timestamp.now().isoformat()
+    nuevos = []
+    for _, s in d.iterrows():
+        if float(s["rvol"]) >= rvol_min and float(s.get("sent_noticias", 0.0)) >= sent_min:
+            if str(s["ticker"]) not in wl:
+                nuevos.append(str(s["ticker"]))
+            wl[str(s["ticker"])] = ahora
+    json.dump(wl, open(WATCHLIST, "w"))
+    return nuevos
 
 # liquidos que NO estan en el universo del estudio (acciones nuevas para el radar)
 NUEVOS = ["SHOP", "PLTR", "SNOW", "CRWD", "DDOG", "NET", "ABNB", "UBER", "COIN", "RBLX",
@@ -70,6 +109,14 @@ def main():
         extra = f" | noticias {s.get('tono','')} ({s.get('sent_noticias',0):+.2f})" if "tono" in d else ""
         print(f"  {s['ticker']:<6} VWAP {s['dist_vwap']*100:+.2f}% RVOL {s['rvol']:.2f} "
               f"sesion {s['ret_sesion']*100:+.2f}%{extra}")
+    # memoria del radar: los prometedores entran en la watchlist y pasan a ser
+    # candidatos operables en los proximos ciclos (el universo crece y rota).
+    nuevos = guardar_en_watchlist(d)
+    vig = watchlist_vigente()
+    if nuevos:
+        print(f"  -> anadidos a la watchlist operable: {nuevos}")
+    if vig:
+        print(f"  watchlist vigente ({len(vig)}): {vig}")
 
 
 if __name__ == "__main__":

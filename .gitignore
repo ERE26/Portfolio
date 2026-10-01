@@ -14,3 +14,4 @@ datos/.alpaca_key
 datos/intraday/
 datos/trades_intradia.csv
 datos/selectividad.json
+datos/watchlist.json

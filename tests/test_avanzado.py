@@ -774,3 +774,46 @@ def test_regimen_mercado_proxy():
                                  "close": np.linspace(10,30,400)}, index=idx)}
     r = OP.regimen_mercado(sube)
     assert r["indice"] == "equiponderado" and r["alcista"] is True
+
+
+def test_memoria_por_ticker_y_ajuste(tmp_path, monkeypatch):
+    """La memoria por ticker encoge hacia 0.5 con pocas ops, penaliza perdedores
+    cronicos y premia ganadores; sin historial el ajuste es 0 (neutro)."""
+    import pandas as pd
+    import registro as R
+    log = tmp_path / "trades.csv"
+    filas = ([{"ticker": "MU", "pnl": -20, "resultado": "loss"}] * 3 +
+             [{"ticker": "NVDA", "pnl": 40, "resultado": "win"}] * 3 +
+             [{"ticker": "JPM", "pnl": 0, "resultado": "open"}])
+    pd.DataFrame(filas).to_csv(log, index=False)
+    monkeypatch.setattr(R, "LOG", str(log))
+    mem = R.memoria_por_ticker()
+    assert mem["MU"]["win_rate_shrunk"] < 0.5 < mem["NVDA"]["win_rate_shrunk"]
+    aj = R.ajuste_memoria(["MU", "NVDA", "JPM", "DESCONOCIDO"], peso=0.6)
+    assert aj["MU"] < 0 < aj["NVDA"]          # perdedor penalizado, ganador premiado
+    assert aj["JPM"] == 0.0 and aj["DESCONOCIDO"] == 0.0   # sin ops cerradas -> neutro
+    # encogido: 3 perdidas no dan -0.6 entero, queda moderado
+    assert aj["MU"] > -0.4
+
+
+def test_watchlist_persistente(tmp_path, monkeypatch):
+    """La watchlist guarda descubrimientos prometedores (RVOL fuerte, sin noticia
+    muy negativa), los sirve como vigentes y purga lo viejo."""
+    import json
+    import pandas as pd
+    import descubrir as D
+    wl = tmp_path / "watchlist.json"
+    monkeypatch.setattr(D, "WATCHLIST", str(wl))
+    d = pd.DataFrame([
+        {"ticker": "SHOP", "rvol": 1.8, "sent_noticias": 0.1},    # entra
+        {"ticker": "COIN", "rvol": 1.2, "sent_noticias": 0.2},    # RVOL flojo, fuera
+        {"ticker": "GM",   "rvol": 1.9, "sent_noticias": -0.3},   # noticia negativa, fuera
+    ])
+    nuevos = D.guardar_en_watchlist(d)
+    assert nuevos == ["SHOP"]
+    assert D.watchlist_vigente() == ["SHOP"]
+    # una entrada vieja se purga
+    json.dump({"SHOP": pd.Timestamp.now().isoformat(),
+               "VIEJO": (pd.Timestamp.now() - pd.Timedelta(days=10)).isoformat()},
+              open(wl, "w"))
+    assert "VIEJO" not in D.watchlist_vigente()

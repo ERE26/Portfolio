@@ -146,6 +146,42 @@ def tickers_en_cooldown(minutos=60):
     return set(perd.loc[ts >= limite, "ticker"].astype(str))
 
 
+def memoria_por_ticker():
+    """Historial REALIZADO por ticker: memoria persistente entre ciclos y dias.
+
+    Para cada nombre con operaciones cerradas: nº de ops, aciertos, win-rate
+    ENCOGIDO hacia 0.5 (Bayes, para no sobre-reaccionar con pocas ops) y P&L total.
+    Es lo que da MEMORIA al selector: un nombre que repite perdidas pierde
+    prioridad; uno que funciona la gana. Con pocas ops se queda casi neutro."""
+    if not os.path.exists(LOG):
+        return {}
+    try:
+        df = pd.read_csv(LOG)
+    except Exception:
+        return {}
+    if "resultado" not in df:
+        return {}
+    cerr = df[df["resultado"].isin(["win", "loss"])]
+    K = 4.0                                   # fuerza del prior (ops neutras equivalentes)
+    out = {}
+    for t, g in cerr.groupby("ticker"):
+        n = int(len(g)); w = int((g["resultado"] == "win").sum())
+        pnl = float(pd.to_numeric(g["pnl"], errors="coerce").fillna(0).sum())
+        out[str(t)] = {"n": n, "wins": w, "win_rate_shrunk": (w + 0.5 * K) / (n + K),
+                       "pnl_total": pnl}
+    return out
+
+
+def ajuste_memoria(tickers, peso=0.6):
+    """Ajuste de convicción por memoria realizada por ticker, en [-peso, +peso].
+
+    0 si no hay historial (neutro); penaliza perdedores crónicos y premia a los que
+    funcionan. Se suma al score de convicción, así el ranking RECUERDA entre ciclos."""
+    mem = memoria_por_ticker()
+    return {str(t): (peso * (2 * mem[str(t)]["win_rate_shrunk"] - 1)) if str(t) in mem else 0.0
+            for t in tickers}
+
+
 def guardar_umbral(umbral_rvol):
     json.dump({"rvol_fuerte": float(umbral_rvol)}, open(CFG, "w"))
 
