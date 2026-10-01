@@ -124,3 +124,28 @@ def cerrar_todo(confirmar=False):
     requests.delete(_url("orders"), headers=_headers(), timeout=30)
     r = requests.delete(_url("positions"), headers=_headers(), timeout=30)
     return {"cerradas": list(pos.keys()), "status": r.status_code}
+
+
+def cerrar_intradia(confirmar=False):
+    """Cierra SOLO el book intradia (las posiciones con ordenes bracket abiertas)
+    y cancela esos brackets. El swing (sin ordenes pendientes) no se toca.
+
+    Devuelve que posiciones cierra y su P&L no realizado en ese momento (= el del
+    dia, porque se abrieron hoy). Con confirmar=False es dry-run.
+    """
+    ordenes = ordenes_abiertas()
+    simbolos = sorted(set(o["symbol"] for o in ordenes))
+    pos = posiciones()
+    a_cerrar = [t for t in simbolos if t in pos]
+    pl = {t: pos[t]["pl"] for t in a_cerrar}
+    if not confirmar:
+        return {"dry_run": True, "cerraria": a_cerrar, "pl": pl}
+    requests.delete(_url("orders"), headers=_headers(), timeout=30)   # cancela los brackets
+    cerradas = []
+    for t in a_cerrar:
+        try:
+            r = requests.delete(_url(f"positions/{t}"), headers=_headers(), timeout=30)
+            cerradas.append((t, r.status_code))
+        except Exception as e:
+            cerradas.append((t, str(e)[:40]))
+    return {"cerradas": cerradas, "pl": pl, "pl_total": sum(pl.values())}
