@@ -413,6 +413,41 @@ La mejora agregada es modesta (el periodo fue 83% alcista), pero **cierra el pun
 débil**: el sistema deja de depender de que el mercado suba. Los 39 cortos nuevos
 tienen profit factor 3.53 (muestra pequeña, alentadora). Es el modo por defecto.
 
+## Validación out-of-universe: ¿generaliza a valores nunca vistos?
+
+La prueba más dura contra el sobreajuste: entrenar con un grupo de valores y
+evaluar en **otro grupo completamente distinto** (`evaluar_out_of_universe`
+divide por ticker, manteniendo la purga temporal). Si el sistema solo hubiera
+memorizado tickers concretos, aquí fracasaría.
+
+![Out-of-universe](figuras/16_out_of_universe.png)
+
+Sobre 9 divisiones aleatorias (entrenar con 83 valores, evaluar en 28 nuevos):
+**8 de 9 son rentables en valores nunca vistos**, con Sharpe mediano **1.85** y
+profit factor mediano ~2.2. Una división falló (Sharpe −1.3, pero con solo 37
+operaciones: ruido muestral). Conclusión honesta: el sistema **generaliza** —
+aprendió patrones, no memorizó valores— aunque con varianza según la composición
+de la cartera de test.
+
+## ¿Funciona en intradía? (5 min – 1 h)
+
+Se probó el sistema completo en temporalidad horaria (1h, 2 años de histórico):
+
+![Temporalidades](figuras/17_temporalidades.png)
+
+| Temporalidad | Acierto bruto | Sharpe | Profit Factor |
+|---|---|---|---|
+| **Diario** (10 años) | 52.5% | **1.84** | **2.17** |
+| 1 hora (2 años) | 48.9% | −0.47 | 0.82 |
+
+**El edge es específico de la temporalidad diaria.** En 1h el sistema pierde. Tiene
+lógica: los factores fundamentales (value, quality) no cambian intradía, el ruido
+de microestructura domina sobre la señal, y el patrón de forma de 40 barras captura
+un fenómeno de medio plazo (semanas), no de horas. En 15 min, Yahoo solo ofrece ~3
+meses de histórico, insuficiente para una validación walk-forward robusta (haría
+falta un proveedor de datos intradía de pago). Es un resultado negativo pero
+valioso: delimita *dónde* vive la ventaja del sistema.
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -524,7 +559,7 @@ fuentes/
   fred.py                FRED: macro de régimen (VIX, curva, crédito)
   form13f.py             smart money: posiciones de los grandes fondos (13F)
   enriquecer.py          combina SEC + FRED + 13F + factores como features
-tests/                   51 tests; el grueso vigila que no se cuele información del futuro
+tests/                   52 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 

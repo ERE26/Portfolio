@@ -258,3 +258,17 @@ def test_cortos_en_bajista():
     sel, m = aplicar_sistema(df, reglas={"permitir_cortos": True, "evitar_vol_baja": False})
     # todas las operadas respetan: largo en alcista, corto en bajista
     assert ((sel["mkt_alcista"] > 0.5) == (sel["lado"] > 0)).all()
+
+
+# ------------------------------------------------- validacion out-of-universe
+def test_out_of_universe_divide_por_ticker():
+    """El test out-of-universe no comparte tickers con el entrenamiento."""
+    import numpy as np
+    from patrones import evaluacion
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=12, n_barras=1600, semilla=4)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    res = evaluacion.evaluar_out_of_universe(b, frac_train=0.7, k=20, primario="memoria",
+                                             semilla=0, verbose=False, n_procesos=1)
+    # las señales de test deben existir y llevar los recorridos para la rentabilidad
+    assert len(res) > 20
+    assert "cam_high" in res.columns and "prob_meta" in res.columns

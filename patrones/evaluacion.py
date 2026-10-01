@@ -487,3 +487,61 @@ def _sharpe(r, periodos=25):
     if len(r) < 3 or r.std(ddof=1) == 0:
         return float("nan")
     return float(r.mean() / r.std(ddof=1) * np.sqrt(periodos))
+
+
+def evaluar_out_of_universe(banco, frac_train=0.75, k=30, primario="ensamble",
+                            semilla=0, verbose=True, n_procesos=4, **kw_mem):
+    """Validacion en tickers NUNCA vistos (prueba de generalizacion mas dura).
+
+    Divide el universo por TICKER: entrena memoria/GBM y el meta con un grupo de
+    valores y evalua en otro grupo completamente distinto. Si funciona, el sistema
+    aprendio patrones generalizables, no memorizo valores concretos. Se mantiene la
+    purga temporal: al predecir un caso en la fecha t, la memoria solo usa casos
+    anteriores a t.
+    """
+    from .primario import crear_primario
+    from .meta import MetaModelo
+    from .etiquetado import pesos_unicidad
+
+    cfg = banco.cfg
+    rng = np.random.default_rng(semilla)
+    tickers = np.array(sorted(banco.meta["ticker"].unique()))
+    rng.shuffle(tickers)
+    n_tr = int(len(tickers) * frac_train)
+    t_train, t_test = set(tickers[:n_tr]), set(tickers[n_tr:])
+    m_tr = banco.meta["ticker"].isin(t_train).to_numpy()
+    b_train = banco.subconjunto(m_tr)
+    b_test = banco.subconjunto(~m_tr)
+    if verbose:
+        print(f"  train: {len(t_train)} valores ({len(b_train)} casos) | "
+              f"test out-of-universe: {len(t_test)} valores ({len(b_test)} casos)")
+
+    # 1) primario entrenado SOLO con los valores de train
+    mem = crear_primario(primario, cfg, k=k, **kw_mem).ajustar(b_train)
+
+    # 2) meta entrenado con predicciones out-of-sample dentro de train
+    #    (mitad temporal tardia de train, para que haya memoria suficiente)
+    corte = pd.Series(b_train.meta["fecha"]).quantile(0.5)
+    val = submuestreo_no_solapado(
+        b_train.subconjunto((b_train.meta["fecha"] >= corte).to_numpy()), cfg.horizonte)
+    gen = (lambda m, b: _predicciones_paralelo(m, b, n_procesos)) if \
+        (n_procesos > 1 and primario == "memoria") else _predicciones_con_features
+    fval, aval, _, _ = gen(mem, val)
+    if len(aval) < 100 or len(np.unique(aval)) < 2:
+        raise RuntimeError("validacion insuficiente para el meta out-of-universe")
+    meta = MetaModelo().entrenar(fval, aval)
+
+    # 3) predecir en los valores de TEST (nunca vistos), con purga temporal
+    test = submuestreo_no_solapado(b_test, cfg.horizonte)
+    ftest, atest, itest, idx_test = gen(mem, test)
+    itest["acierto_primario"] = atest
+    itest["prob_meta"] = meta.prob_acierto(ftest)
+    itest["pliegue"] = 1
+    # recorridos por señal, para recalcular barreras / rentabilidad
+    itest["cam_high"] = list(test.caminos_high[idx_test]) if test.caminos_high is not None else None
+    itest["cam_low"] = list(test.caminos_low[idx_test]) if test.caminos_low is not None else None
+    itest["cam_close"] = list(test.caminos[idx_test])
+    if verbose:
+        print(f"  meta AUC validacion: {_auc(aval, meta.prob_acierto(fval)):.3f} | "
+              f"{len(atest)} señales en test out-of-universe")
+    return itest
