@@ -914,3 +914,19 @@ def test_conviccion_confluencia_rechaza_debiles(monkeypatch):
     r = G.rankear_conviccion(opo, umbral_fuerte=1.5)
     t = list(r["ticker"])
     assert t == ["FUERTE"]    # solo el que pasa las 6 confirmaciones
+
+
+def test_tsmom_signal_y_backtest():
+    """TSMOM: señal en [-1,1] (signo del propio pasado) y backtest con vol targeting."""
+    import numpy as np, pandas as pd
+    from patrones import tsmom as TS
+    idx = pd.date_range("2010-01-01", periods=900, freq="B")
+    sube = pd.DataFrame({"AAA": np.linspace(10, 40, 900)}, index=idx)      # tendencia alcista
+    baja = pd.DataFrame({"BBB": np.linspace(40, 10, 900)}, index=idx)      # bajista
+    pre = {"AAA": sube.rename(columns={"AAA": "close"}),
+           "BBB": baja.rename(columns={"BBB": "close"})}
+    panel = TS.panel_precios(pre)
+    sig = TS.signal_tsmom(panel, horizontes=(21, 63, 126, 252))
+    assert sig["AAA"] > 0 and sig["BBB"] < 0           # largo el alcista, corto el bajista
+    d, m = TS.backtest(pre, freq="ME", min_activos=2)
+    assert "sharpe" in m and m["periodos"] > 12
