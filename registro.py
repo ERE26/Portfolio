@@ -20,7 +20,8 @@ from fuentes import alpaca_trade as AT
 LOG = "datos/trades_intradia.csv"
 CFG = "datos/selectividad.json"
 COLS = ["ts", "ticker", "qty", "entrada", "tp", "sl", "rvol", "dist_vwap",
-        "ret_sesion", "atr_pct", "sent_noticias", "hora", "salida", "pnl", "resultado"]
+        "ret_sesion", "atr_pct", "sent_noticias", "hora", "salida", "salida_ts",
+        "pnl", "resultado"]
 MIN_TRADES = 25           # minimo para fiarse del analisis y afinar umbrales
 
 
@@ -34,8 +35,8 @@ def registrar_entrada(ticker, qty, precio, tp, sl, feats):
             "ret_sesion": round(float(feats.get("ret_sesion", float("nan"))), 5),
             "atr_pct": round(float(feats.get("atr_pct", float("nan"))), 5),
             "sent_noticias": round(float(feats.get("sent_noticias", 0.0)), 3),
-            "hora": pd.Timestamp.now().strftime("%H:%M"), "salida": "", "pnl": "",
-            "resultado": "open"}
+            "hora": pd.Timestamp.now().strftime("%H:%M"), "salida": "", "salida_ts": "",
+            "pnl": "", "resultado": "open"}
     df = pd.read_csv(LOG) if os.path.exists(LOG) else pd.DataFrame(columns=COLS)
     df = pd.concat([df, pd.DataFrame([fila])], ignore_index=True)
     df.to_csv(LOG, index=False)
@@ -75,6 +76,7 @@ def reconciliar():
             precio_salida = float(v.get("price", 0))
             pnl = (precio_salida - float(row["entrada"])) * float(row["qty"])
             df.at[i, "salida"] = round(precio_salida, 4)
+            df.at[i, "salida_ts"] = v.get("transaction_time", "")
             df.at[i, "pnl"] = round(pnl, 2)
             df.at[i, "resultado"] = "win" if pnl > 0 else "loss"
             usadas.add(j)
@@ -116,6 +118,32 @@ def analizar_selectividad():
     else:
         out["mensaje"] = f"sin mejora clara por RVOL (acierto global {base_wr:.0%}); umbral sin cambios"
     return out
+
+
+def tickers_en_cooldown(minutos=60):
+    """Nombres que han tocado SL (perdida) hace poco: NO re-entrar enseguida.
+
+    Un nombre que acaba de saltarte el stop suele estar en whipsaw (RVOL alto que
+    revierte), no en tendencia limpia; recomprarlo porque 'la foto sigue guapa' es
+    el churn que pierde con costes. Mejor esperar a que se calme o demuestre fuerza
+    nueva. Usa la hora de salida real (salida_ts) y, si falta, la de entrada."""
+    if not os.path.exists(LOG):
+        return set()
+    try:
+        df = pd.read_csv(LOG)
+    except Exception:
+        return set()
+    if "resultado" not in df:
+        return set()
+    perd = df[df["resultado"] == "loss"].copy()
+    if len(perd) == 0:
+        return set()
+    cuando = perd.get("salida_ts")
+    ts = pd.to_datetime(cuando, errors="coerce", utc=True) if cuando is not None else pd.NaT
+    ent = pd.to_datetime(perd["ts"], errors="coerce", utc=True)
+    ts = ts.fillna(ent) if hasattr(ts, "fillna") else ent
+    limite = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=minutos)
+    return set(perd.loc[ts >= limite, "ticker"].astype(str))
 
 
 def guardar_umbral(umbral_rvol):

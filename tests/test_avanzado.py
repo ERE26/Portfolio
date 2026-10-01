@@ -707,3 +707,32 @@ def test_aplicar_sistema_coste_realista():
     sel_0, met_0 = rentabilidad.aplicar_sistema(
         res, reglas=reglas, coste_atr=lambda d: np.zeros(len(d)))
     assert met_0["ret_medio_atr"] >= met_p["ret_medio_atr"] - 1e-9
+
+
+def test_cooldown_tras_sl(tmp_path, monkeypatch):
+    """Un nombre que acaba de perder (SL) entra en cooldown; una perdida vieja no;
+    y un nombre con solo operaciones ganadoras/abiertas no entra."""
+    import pandas as pd
+    import registro as R
+    log = tmp_path / "trades.csv"
+    ahora = pd.Timestamp.now(tz="UTC")
+    df = pd.DataFrame([
+        {"ticker": "MU",  "ts": (ahora - pd.Timedelta(minutes=120)).isoformat(),
+         "salida_ts": (ahora - pd.Timedelta(minutes=10)).isoformat(), "resultado": "loss"},
+        {"ticker": "GM",  "ts": (ahora - pd.Timedelta(hours=5)).isoformat(),
+         "salida_ts": (ahora - pd.Timedelta(hours=4)).isoformat(), "resultado": "loss"},
+        {"ticker": "JPM", "ts": (ahora - pd.Timedelta(minutes=5)).isoformat(),
+         "salida_ts": "", "resultado": "open"},
+        {"ticker": "COST", "ts": (ahora - pd.Timedelta(minutes=5)).isoformat(),
+         "salida_ts": (ahora - pd.Timedelta(minutes=2)).isoformat(), "resultado": "win"},
+    ])
+    df.to_csv(log, index=False)
+    monkeypatch.setattr(R, "LOG", str(log))
+    cd = R.tickers_en_cooldown(minutos=60)
+    assert "MU" in cd            # perdio hace 10 min -> cooldown
+    assert "GM" not in cd        # perdio hace 4 h -> fuera de la ventana
+    assert "JPM" not in cd       # abierta, no es perdida
+    assert "COST" not in cd      # ganadora
+    # sin archivo -> conjunto vacio
+    monkeypatch.setattr(R, "LOG", str(tmp_path / "noexiste.csv"))
+    assert R.tickers_en_cooldown() == set()

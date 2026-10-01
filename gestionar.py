@@ -182,15 +182,20 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     # con candidatos fuertes. Cubre tanto lo que cerramos por reversion como lo que
     # cerro solo el bracket al tocar TP/SL. Con cabeza: calidad > cantidad; si no hay
     # un candidato fuerte, se queda en efectivo (no operar por operar).
-    from registro import cargar_umbral, registrar_entrada
+    from registro import cargar_umbral, registrar_entrada, tickers_en_cooldown
     N_OBJETIVO = 3
     RVOL_FUERTE = cargar_umbral(1.5)      # umbral afinado por el aprendizaje (o 1.5 a priori)
     if gestionar and rotar:
         held = set(pos) - set(a_cerrar)
+        # cooldown: no re-entrar en un nombre que acaba de tocar SL (evita el churn
+        # de comprar-perder-recomprar en un whipsaw; con cabeza > foto bonita).
+        cooldown = tickers_en_cooldown(minutos=60)
+        if cooldown:
+            print(f"\nEn cooldown tras SL (no re-entrar aun): {sorted(cooldown)}")
         intradia_vivas = len(rev) - len(a_cerrar)      # brackets que siguen abiertos
         libres = max(N_OBJETIVO - intradia_vivas, 0)
         # ranking por CONVICCION (confluencia) + gate de catalizador de noticias
-        fuertes = rankear_conviccion(opo, RVOL_FUERTE, excluir=held)
+        fuertes = rankear_conviccion(opo, RVOL_FUERTE, excluir=held | cooldown)
         if libres and len(fuertes):
             cfg = CONFIG["15Min"]
             cash = float(AT.cuenta()["cash"])
