@@ -143,6 +143,11 @@ REGLAS_SISTEMA = {
     "permitir_cortos": True,    # largos si el mercado sube, cortos si cae (robusto en ambos)
     "salida_cierre": False,     # intradia: forzar el cierre de la posicion al final del dia (EOD)
     "rvol_min": None,           # intradia: operar solo con volumen relativo >= rvol_min
+    "cuantil_meta": None,       # seleccionar el top-x por ranking del meta (robusto a la calibracion)
+    "sizing": "igual",          # tamano: 'igual' | 'confianza' | 'kelly' (frac. de Kelly)
+    "kelly_fraccion": 0.25,     # fraccion de Kelly si sizing='kelly'
+    "vol_objetivo": None,       # ATR% de referencia para escalar inverso a la volatilidad
+    "solo_sectores": None,      # lista de sectores a operar (p.ej. ciclicos); None = todos
 }
 
 
@@ -165,13 +170,21 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
                     index=d.index)
     vol_alta = pd.qcut(vol.rank(method="first"), 3, labels=["baja", "media", "alta"]) != "baja"
 
-    m = d["prob_meta"] >= r["umbral_meta"]
+    # seleccion por ranking (cuantil) o por umbral absoluto del meta. El cuantil es
+    # robusto a la calibracion: la isotonica es monotona, asi que el top-x no cambia.
+    if r.get("cuantil_meta"):
+        umbral = d["prob_meta"].quantile(1.0 - r["cuantil_meta"])
+        m = d["prob_meta"] >= umbral
+    else:
+        m = d["prob_meta"] >= r["umbral_meta"]
     if r["evitar_vol_baja"]:
         m &= vol_alta
     if r.get("salida_cierre") and "barras_hasta_cierre" in d:
         m &= d["barras_hasta_cierre"] >= 1       # sin barra posterior no hay operacion
     if r.get("rvol_min") is not None and "rvol" in d:
         m &= d["rvol"] >= r["rvol_min"]          # filtro "stocks in play": volumen anormal
+    if r.get("solo_sectores") and "sector" in d:
+        m &= d["sector"].isin(r["solo_sectores"])  # p.ej. operar solo sectores ciclicos
     if r.get("permitir_cortos") and "mkt_alcista" in d:
         # a favor del regimen: largos cuando el mercado sube, cortos cuando cae.
         alcista = d["mkt_alcista"] > 0.5
@@ -181,16 +194,29 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
             m &= d["lado"] > 0
         if r["solo_mercado_alcista"] and "mkt_alcista" in d:
             m &= d["mkt_alcista"] > 0.5
-    sel = d[m]
+    sel = d[m].copy()
     if len(sel) < 20:
         return sel, {"operaciones": len(sel)}
-    rr = sel["ret_op"].to_numpy()
+    # tamano de cada operacion (Kelly/confianza/igual) x escalado de volatilidad.
+    # El retorno dimensionado escala coste y resultado por igual (coste ya restado).
+    from .sizing import pesos_posicion
+    w = pesos_posicion(sel, r, b=r["k_pt"] / max(r["k_sl"], 1e-9))
+    # tamano 0 = sin ventaja (Kelly): no es una operacion, se descarta de las metricas.
+    keep = w > 1e-9
+    sel, w = sel[keep].copy(), w[keep]
+    if len(sel) < 20:
+        return sel, {"operaciones": len(sel)}
+    sel["tam"] = w
+    sel["ret_sized"] = sel["ret_op"].to_numpy() * w
+    rr = sel["ret_sized"].to_numpy()
     pos, neg = rr[rr > 0].sum(), -rr[rr < 0].sum()
-    por_pliegue = {int(pl): float(g["ret_op"].mean()) for pl, g in sel.groupby("pliegue")}
+    por_pliegue = {int(pl): float(g["ret_sized"].mean()) for pl, g in sel.groupby("pliegue")}
     met = {
         "operaciones": int(len(sel)), "cobertura": len(sel) / len(res),
         "ret_medio_atr": float(rr.mean()), "sharpe": _sharpe(rr),
-        "profit_factor": float(pos / max(neg, 1e-9)), "pct_ganadoras": float((rr > 0).mean()),
+        "profit_factor": float(pos / max(neg, 1e-9)),
+        "pct_ganadoras": float((rr > 0).mean()),
+        "tam_medio": float(np.mean(w)),
         "pliegues_rentables": int(sum(v > 0 for v in por_pliegue.values())),
         "n_pliegues": len(por_pliegue), "ret_por_pliegue": por_pliegue,
     }

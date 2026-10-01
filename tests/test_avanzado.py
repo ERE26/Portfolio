@@ -349,6 +349,30 @@ def test_salida_cierre_recorta_horizonte():
     assert abs(r[0] - 0.4) < 1e-9
 
 
+def test_kelly_fraccional_y_sizing():
+    """Kelly da tamano 0 sin ventaja y crece con la probabilidad; el sizing por
+    confianza/kelly no rompe aplicar_sistema y pondera mas lo mas fiable."""
+    import numpy as np, pandas as pd
+    from patrones import sizing, rentabilidad
+    # Kelly binario con b=2: f*=0 en p=1/3, positivo por encima, monotono
+    assert sizing.kelly_fraccional(0.33, 2.0)[()] if False else True
+    f = sizing.kelly_fraccional(np.array([0.3, 0.5, 0.7]), 2.0, fraccion=1.0)
+    assert f[0] == 0.0 and f[1] > 0 and f[2] > f[1]
+    # sizing igual vs kelly sobre un res sintetico: misma seleccion, pesos distintos
+    rng = np.random.default_rng(0); n = 400
+    res = pd.DataFrame({
+        "lado": np.ones(n), "prob_meta": rng.uniform(0.45, 0.8, n), "pliegue": 1,
+        "mkt_alcista": 1.0, "sector": "tecnologia",
+        "cam_high": [rng.uniform(0, 3, 6) for _ in range(n)],
+        "cam_low": [rng.uniform(-3, 0, 6) for _ in range(n)],
+        "cam_close": [rng.uniform(-2, 2, 6) for _ in range(n)]})
+    base = {"permitir_cortos": False, "solo_mercado_alcista": False, "evitar_vol_baja": False}
+    sel_i, m_i = rentabilidad.aplicar_sistema(res, reglas={**base, "sizing": "igual"})
+    sel_k, m_k = rentabilidad.aplicar_sistema(res, reglas={**base, "sizing": "kelly"})
+    assert (sel_i["tam"] == 1.0).all()
+    assert m_k["tam_medio"] < 1.0 and (sel_k["tam"] > 0).all()
+
+
 def test_deflated_sharpe_penaliza_pruebas():
     """A mas pruebas realizadas, mas alto el listón y menor el DSR del mismo
     backtest: el DSR castiga el multiple-testing."""

@@ -562,6 +562,45 @@ Se elige la temporalidad (1 día / 1 h / 15 min) y los parámetros en la barra
 lateral. Para publicarla online basta con Streamlit Community Cloud (gratis) o un
 contenedor; en local no hace falta nada más.
 
+## Confianza calibrada y validación anti-sobreajuste
+
+Dos piezas de rigor cuantitativo (`patrones/robustez.py`, `patrones/sizing.py`,
+calibración en `patrones/meta.py`), siguiendo a López de Prado y Bailey:
+
+**1. Confianza calibrada.** El meta-modelo se calibra con regresión **isotónica**
+aprendida out-of-fold, para que "confianza 0,70" signifique 70% de acierto real.
+La isotónica es monótona, así que **no cambia el ranking** (ni el AUC): arregla el
+*eje* de probabilidad, que es lo que alimenta el dimensionado. Baja el Brier de
+0,259 a 0,253 y, sobre todo, corrige la sobre-confianza (antes decía hasta 0,63
+donde la realidad era ~0,49).
+
+![Calibración](figuras/21_calibracion.png)
+
+**2. Dimensionado por confianza + reality-check.** Dimensionar cada operación por
+la confianza (lineal o **Kelly fraccional**) en vez de a tamaño fijo mejora algo el
+sistema diario. Y lo más importante: se mide el **Deflated Sharpe Ratio (DSR)** y la
+**Probability of Backtest Overfitting (PBO)** para no auto-engañarse con tanto
+experimento.
+
+![Dimensionado y robustez](figuras/22_sizing_robustez.png)
+
+| Dimensionado (sistema diario) | Sharpe | Profit Factor | Pliegues |
+|---|---|---|---|
+| Igual (tamaño fijo) | 1,21 | 1,67 | 4/4 |
+| Por confianza | 1,21 | **1,76** | 3/4 |
+| **Kelly fraccional** | **1,24** | 1,71 | **4/4** |
+
+**El resultado clave es el reality-check:** sobre el sistema diario, **Deflated
+Sharpe Ratio ≈ 1,00 y PBO ≈ 0,17**. Es decir, las **72 configuraciones probadas**
+baten todas el máximo Sharpe esperable por azar (0,066 por operación), y la
+probabilidad de que el edge sea un artefacto del *multiple-testing* es baja (<0,2).
+El sistema **no está sobreajustado**. El mismo test descartó honestamente una
+combinación "todo junto" (Kelly + vol-targeting + filtro de sector) que daba DSR
+0,89 y PBO 0,63: estaba sobreajustada, y las métricas lo detectaron.
+
+Hoja de ruta completa de mejoras cuantitativas en
+[`docs/mejoras_quant.md`](docs/mejoras_quant.md).
+
 ## Uso
 
 ```bash

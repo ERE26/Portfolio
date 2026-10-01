@@ -5,6 +5,18 @@ mejor según los resultados actuales, y (2) los métodos cuantitativos concretos
 —con su referencia y su forma de implementarse— para subir el rendimiento y
 añadir confianza a las señales. Ordenado por retorno sobre esfuerzo.
 
+## Estado de implementación
+
+- ✅ **Paso 1 — Confianza + anti-sobreajuste** (`robustez.py`, calibración en
+  `meta.py`): calibración isotónica del meta (Brier 0,259→0,253); Deflated Sharpe
+  Ratio y PBO. Resultado: el sistema diario da **DSR ≈ 1,00 y PBO ≈ 0,17** (no
+  sobreajustado). Ver README, figuras 21-22.
+- ✅ **Paso 2 — Dimensionado** (`sizing.py`): Kelly fraccional y sizing por
+  confianza (Sharpe 1,21→1,24, PF 1,67→1,76); vol-targeting y filtro de sector
+  disponibles pero el reality-check los descartó (sobreajuste).
+- ⬜ **Paso 3 — Pipeline quant** (riesgo Ledoit-Wolf/HRP, ensemble de horizontes).
+- ⬜ **Paso 4 — Interfaz** (calibración visible, Yahoo al vuelo, branding, export).
+
 ## 1. Dónde funciona hoy el sistema (datos propios)
 
 Del walk-forward diario (res final, 745 operaciones seleccionadas, Sharpe 1.21,
