@@ -478,16 +478,56 @@ más ruido y costes.
 
 ```bash
 python bot.py descargar-intraday --intervalo 1Hour   # requiere claves de Alpaca (gratis)
+python bot.py descargar-intraday --intervalo 15Min    # 15 min, ~5 años de histórico
 ```
 
 **Fuentes de datos intradía** (por si quieres más profundidad): Alpaca (gratis,
-IEX, ~5 años), Twelve Data y Alpha Vantage (gratis con límites), Polygon y
-Databento (de pago, tick data profesional). Para 15 min con años de histórico hace
-falta una de pago.
+IEX, ~5 años **también en 15 min**), Twelve Data y Alpha Vantage (gratis con
+límites), Polygon y Databento (de pago, tick data profesional con volumen
+consolidado). El volumen de IEX es parcial (una fracción del mercado), así que el
+RVOL es un proxy; para volumen consolidado exacto haría falta una de pago, pero el
+OHLC y el histórico de 15 min de Alpaca son suficientes para el estudio.
 
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
+
+## Bajando a 15 minutos: filtro RVOL y salida al cierre
+
+Con Alpaca se puede bajar a **15 minutos** (Yahoo solo daba 3 meses; Alpaca da
+**~5 años**, 1,88 M de barras en 47 valores líquidos → **121 189 casos**). A esta
+escala se probaron dos ideas de la teoría de intradía, con un resultado honesto:
+una funciona y la otra no.
+
+1. **Filtro RVOL ("stocks in play"):** operar solo cuando el volumen relativo es
+   anormal (RVOL ≥ 1,0). **Funciona**: sube el Sharpe de 0,72 a **1,04**, hace
+   positivos los **4/4 pliegues** y aguanta el coste (Sharpe ≥ 0,85 incluso con
+   0,15 ATR por operación). Es la evidencia de que el edge intradía vive donde hay
+   interés anormal, no en cualquier barra.
+2. **Salida forzada al cierre (EOD):** cerrar la posición al final de la sesión
+   (sin riesgo de hueco nocturno). **No funciona**: baja el Sharpe de 0,72 a 0,18,
+   y combinada con el filtro se vuelve negativa. Forzar el cierre **corta el
+   recorrido**: a 15 min el edge necesita dejar correr la deriva de varias horas
+   (que a menudo cruza al día siguiente), igual que en 1h mandaba la *continuación*
+   y no la reversión. El día-trading puro (plano al cierre) apenas empata.
+
+![Intradía 15 minutos](figuras/19_intradia_15m.png)
+
+| Config. 15 min (continuación, coste 0,07 ATR) | Sharpe | Profit Factor | Oper. | Pliegues |
+|---|---|---|---|---|
+| Base (sin filtro) | 0,72 | 1,36 | 120 | 3/4 |
+| **+ Filtro RVOL ≥ 1,0** | **1,04** | **1,56** | 35 | **4/4** |
+| Forzar cierre (EOD) | 0,18 | 1,09 | 116 | 2/4 |
+| EOD + RVOL ≥ 1,0 | −0,30 | 0,87 | 34 | 2/4 |
+
+La lectura completa de la escala temporal es coherente: **1 día Sharpe 1,84 → 1 h
+1,21 → 15 min ~1,0** (con RVOL). Cuanto más se baja, más ruido y más coste, y más
+selectivo hay que ser (el mejor 15 min opera solo 35 veces). El filtro RVOL es
+justo esa selectividad. La salida al cierre, que parecía prudente, resultó
+contraproducente: un resultado negativo, pero medido y explicable, que es tan
+valioso como los positivos. Ambas mecánicas (`salida_cierre`, `rvol_min`) quedan
+en el sistema para quien quiera operar día-trading estricto, aunque aquí rinda
+menos.
 
 ## Uso
 
