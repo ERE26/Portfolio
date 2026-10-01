@@ -316,3 +316,58 @@ def test_intradia_cero_en_diario():
     b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
     for c in ["intra_dist_vwap", "intra_pos_rango", "intra_ret_sesion"]:
         assert (b.feat[:, b.nombres_feat.index(c)] == 0).all()
+
+
+def test_barras_hasta_cierre():
+    """Cuenta correctamente las barras que quedan hasta el final de la sesion,
+    respetando sesiones de distinta longitud (p.ej. medias sesiones)."""
+    import pandas as pd
+    from patrones import intradia
+    idx = pd.to_datetime([
+        "2024-01-02 09:30", "2024-01-02 10:30", "2024-01-02 11:30", "2024-01-02 12:30",
+        "2024-01-03 09:30", "2024-01-03 10:30"])          # segunda sesion mas corta
+    bhc = intradia.barras_hasta_cierre(idx)
+    assert bhc.tolist() == [3, 2, 1, 0, 1, 0]
+
+
+def test_salida_cierre_recorta_horizonte():
+    """La salida EOD ignora las barreras tocadas despues del cierre de sesion:
+    una senal cuyo objetivo se alcanza fuera de la sesion se cierra al ultimo
+    precio del dia, no al horizonte completo."""
+    import numpy as np, pandas as pd
+    from patrones.rentabilidad import etiqueta_desde_recorrido
+    sel = pd.DataFrame({
+        "lado": [1],
+        "cam_high": [np.array([0.5, 0.5, 3.0, 3.0])],   # objetivo 2.0 solo en barra 3
+        "cam_low": [np.array([-0.2, -0.2, -0.2, -0.2])],
+        "cam_close": [np.array([0.3, 0.4, 2.5, 2.6])],
+    })
+    # sin cap: toca el objetivo en la barra 2 -> +k_pt
+    assert abs(etiqueta_desde_recorrido(sel, 2.0, 1.0)[0] - 2.0) < 1e-9
+    # con cap=2 (cierra tras 2 barras): no toca objetivo, cierra en cam_close[1]=0.4
+    r = etiqueta_desde_recorrido(sel, 2.0, 1.0, cap=np.array([2]))
+    assert abs(r[0] - 0.4) < 1e-9
+
+
+def test_filtro_rvol_y_eod_en_aplicar_sistema():
+    """aplicar_sistema respeta el filtro RVOL y la salida al cierre cuando el
+    banco trae las columnas intradia; sin ellas, el sistema diario no cambia."""
+    import numpy as np, pandas as pd
+    from patrones import rentabilidad
+    rng = np.random.default_rng(0)
+    n = 300
+    res = pd.DataFrame({
+        "lado": np.ones(n), "prob_meta": rng.uniform(0.5, 0.8, n),
+        "pliegue": 1, "mkt_alcista": 1.0,
+        "barras_hasta_cierre": rng.integers(0, 6, n).astype(float),
+        "rvol": rng.uniform(0.5, 3.0, n),
+        "cam_high": [rng.uniform(0, 3, 6) for _ in range(n)],
+        "cam_low": [rng.uniform(-3, 0, 6) for _ in range(n)],
+        "cam_close": [rng.uniform(-2, 2, 6) for _ in range(n)],
+    })
+    sel, _ = rentabilidad.aplicar_sistema(
+        res, reglas={"salida_cierre": True, "rvol_min": 1.5, "permitir_cortos": False,
+                     "solo_mercado_alcista": False})
+    # todas las operadas cumplen el filtro RVOL y tienen barra posterior (EOD)
+    assert (sel["rvol"] >= 1.5).all()
+    assert (sel["barras_hasta_cierre"] >= 1).all()

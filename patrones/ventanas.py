@@ -263,6 +263,17 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         if len(pos) == 0:
             continue
 
+        # metadatos intradia: barras hasta el cierre de la sesion (para la salida
+        # EOD) y volumen relativo (para el filtro RVOL). En diario quedan neutros
+        # (horizonte completo y rvol 1.0), asi que no cambian el sistema diario.
+        from .intradia import es_intradia as _es_intra, barras_hasta_cierre as _bhc, rvol as _rvol
+        if _es_intra(df.index):
+            bhc = _bhc(df.index)[pos]
+            rv = _rvol(df).to_numpy(float)[pos]
+        else:
+            bhc = np.full(len(pos), H, int)
+            rv = np.full(len(pos), 1.0)
+
         Wc = ventanas_de(lc, L)          # fila i = barras i..i+L-1
         Wv = ventanas_de(lv, L)
         fila_forma = pos - L + 1
@@ -316,7 +327,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
             "ticker": t, "fecha": fechas[valido],
             "sector": ctx.sector_de(t) if ctx is not None else "desconocido",
             "close": df["close"].to_numpy(float)[pos][valido],
-            "atr_pct": atr_pct[valido]}))
+            "atr_pct": atr_pct[valido],
+            "barras_hasta_cierre": bhc[valido], "rvol": rv[valido]}))
         acum["y"].append(pd.DataFrame({
             "ret": ret[valido], "direccion": np.sign(ret[valido]),
             "tb_label": tb["label"][valido], "tb_ret": tb["ret"][valido],

@@ -20,9 +20,17 @@ def _max_drawdown(equity):
     return float((equity - np.maximum.accumulate(equity)).min())
 
 
-def etiqueta_desde_recorrido(sel, k_pt, k_sl):
+def etiqueta_desde_recorrido(sel, k_pt, k_sl, cap=None):
     """Recalcula el retorno (en ATR) de cada senal para un ratio objetivo/stop,
-    usando el recorrido de maximos/minimos guardado en las columnas cam_*."""
+    usando el recorrido de maximos/minimos guardado en las columnas cam_*.
+
+    cap: horizonte efectivo por caso (numero de barras futuras que se pueden
+    usar). Sirve para la SALIDA AL CIERRE (EOD): una operacion intradia no puede
+    sostenerse mas alla del final de la sesion, asi que solo cuentan las barreras
+    tocadas dentro de la sesion y, si no se toca ninguna, se cierra al precio de
+    la ultima barra del dia (no al horizonte completo). Con cap=None se usa el
+    horizonte completo (comportamiento del sistema diario, sin cambios).
+    """
     hi = np.vstack(sel["cam_high"].to_numpy())
     lo = np.vstack(sel["cam_low"].to_numpy())
     cc = np.vstack(sel["cam_close"].to_numpy())
@@ -30,10 +38,20 @@ def etiqueta_desde_recorrido(sel, k_pt, k_sl):
     # para un largo, objetivo arriba y stop abajo; para un corto, al reves
     fav = np.where(lado > 0, hi, -lo)       # recorrido a favor del lado (ATR)
     adv = np.where(lado > 0, lo, -hi)       # recorrido en contra
-    H = hi.shape[1]; GR = H + 10
-    t_obj = np.where((fav >= k_pt).any(1), (fav >= k_pt).argmax(1), GR)
-    t_stop = np.where((adv <= -k_sl).any(1), (adv <= -k_sl).argmax(1), GR)
-    ret = (lado.ravel() * cc[:, -1])        # vencimiento: cierre a favor del lado
+    n, H = hi.shape
+    GR = H + 10
+    if cap is None:
+        heff = np.full(n, H, int)
+    else:
+        heff = np.clip(np.nan_to_num(np.asarray(cap, float), nan=H).astype(int), 1, H)
+    dentro = np.arange(H)[None, :] < heff[:, None]   # barras dentro de la sesion
+    obj = (fav >= k_pt) & dentro
+    stp = (adv <= -k_sl) & dentro
+    t_obj = np.where(obj.any(1), obj.argmax(1), GR)
+    t_stop = np.where(stp.any(1), stp.argmax(1), GR)
+    # vencimiento: cierre de la ultima barra admisible (cierre de sesion si EOD)
+    cc_salida = cc[np.arange(n), heff - 1]
+    ret = lado.ravel() * cc_salida
     ret = np.where(t_obj < t_stop, k_pt, np.where(t_stop < GR, -k_sl, ret))
     return ret.astype(float)
 
@@ -123,6 +141,8 @@ REGLAS_SISTEMA = {
     "k_pt": 3.0, "k_sl": 1.5, "umbral_meta": 0.55,
     "solo_largos": True, "evitar_vol_baja": True, "solo_mercado_alcista": True,
     "permitir_cortos": True,    # largos si el mercado sube, cortos si cae (robusto en ambos)
+    "salida_cierre": False,     # intradia: forzar el cierre de la posicion al final del dia (EOD)
+    "rvol_min": None,           # intradia: operar solo con volumen relativo >= rvol_min
 }
 
 
@@ -136,7 +156,11 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
     d = res.copy()
     if invertir:                    # reversion: operar lo contrario de la senal
         d["lado"] = -d["lado"]
-    d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"]) - coste_atr
+    # salida al cierre (EOD): el horizonte de cada operacion se recorta al final
+    # de la sesion. Requiere la columna 'barras_hasta_cierre' (banco intradia).
+    cap = d["barras_hasta_cierre"].to_numpy() if (
+        r.get("salida_cierre") and "barras_hasta_cierre" in d) else None
+    d["ret_op"] = etiqueta_desde_recorrido(d, r["k_pt"], r["k_sl"], cap=cap) - coste_atr
     vol = pd.Series([np.max(h) - np.min(l) for h, l in zip(d["cam_high"], d["cam_low"])],
                     index=d.index)
     vol_alta = pd.qcut(vol.rank(method="first"), 3, labels=["baja", "media", "alta"]) != "baja"
@@ -144,6 +168,10 @@ def aplicar_sistema(res, reglas=None, coste_atr=0.05, invertir=False):
     m = d["prob_meta"] >= r["umbral_meta"]
     if r["evitar_vol_baja"]:
         m &= vol_alta
+    if r.get("salida_cierre") and "barras_hasta_cierre" in d:
+        m &= d["barras_hasta_cierre"] >= 1       # sin barra posterior no hay operacion
+    if r.get("rvol_min") is not None and "rvol" in d:
+        m &= d["rvol"] >= r["rvol_min"]          # filtro "stocks in play": volumen anormal
     if r.get("permitir_cortos") and "mkt_alcista" in d:
         # a favor del regimen: largos cuando el mercado sube, cortos cuando cae.
         alcista = d["mkt_alcista"] > 0.5

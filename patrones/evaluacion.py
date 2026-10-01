@@ -309,6 +309,9 @@ def _worker_pred(i):
             "atr_pct": float(banco_sub.meta["atr_pct"].iloc[i]) if "atr_pct" in banco_sub.meta else np.nan,
             "sector": banco_sub.meta["sector"].iloc[i] if "sector" in banco_sub.meta else "",
             "patron": banco_sub.meta["patron"].iloc[i] if "patron" in banco_sub.meta else "",
+            "barras_hasta_cierre": float(banco_sub.meta["barras_hasta_cierre"].iloc[i])
+            if "barras_hasta_cierre" in banco_sub.meta else np.nan,
+            "rvol": float(banco_sub.meta["rvol"].iloc[i]) if "rvol" in banco_sub.meta else np.nan,
             "mkt_alcista": float(banco_sub.feat[i, banco_sub.nombres_feat.index("mkt_sobre_sma200")])
             if "mkt_sobre_sma200" in banco_sub.nombres_feat else np.nan}
     return (features_meta(p, banco_sub, i), etiqueta_acierto(p, yf), info, i)
@@ -351,6 +354,9 @@ def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
                      if "atr_pct" in banco_sub.meta else np.nan,
                      "sector": banco_sub.meta["sector"].iloc[i] if "sector" in banco_sub.meta else "",
                      "patron": banco_sub.meta["patron"].iloc[i] if "patron" in banco_sub.meta else "",
+                     "barras_hasta_cierre": float(banco_sub.meta["barras_hasta_cierre"].iloc[i])
+                     if "barras_hasta_cierre" in banco_sub.meta else np.nan,
+                     "rvol": float(banco_sub.meta["rvol"].iloc[i]) if "rvol" in banco_sub.meta else np.nan,
                      "mkt_alcista": float(banco_sub.feat[i, banco_sub.nombres_feat.index("mkt_sobre_sma200")])
                      if "mkt_sobre_sma200" in banco_sub.nombres_feat else np.nan})
         idxs.append(i)

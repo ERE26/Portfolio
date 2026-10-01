@@ -111,6 +111,24 @@ def spread_corwin_schultz(df, ventana=20):
     return s.rolling(ventana, min_periods=5).median().fillna(s.median())
 
 
+def barras_hasta_cierre(index):
+    """Numero de barras que quedan hasta la ultima barra de la sesion (dia natural).
+
+    0 = esta barra ES el cierre de la sesion. Es lo que permite forzar la salida
+    al cierre (EOD): una operacion intradia no puede sostenerse mas alla del final
+    del dia, asi que el horizonte efectivo de cada caso se recorta a este numero.
+    Se calcula de los datos reales, asi que respeta medias sesiones (cierres
+    anticipados) sin tener que asumir una rejilla horaria fija.
+    """
+    idx = pd.DatetimeIndex(index)
+    dia = idx.normalize()
+    s = pd.Series(np.arange(len(idx)), index=range(len(idx)))
+    g = s.groupby(pd.Series(dia, index=s.index))
+    pos_en_dia = g.cumcount().to_numpy()
+    n_dia = g.transform("size").to_numpy()
+    return (n_dia - 1 - pos_en_dia).astype(int)
+
+
 def rvol(df, lookback=20):
     """Relative Volume: volumen acumulado del dia hasta la barra t frente a la media
     del volumen acumulado a la MISMA hora en los ultimos 'lookback' dias.
