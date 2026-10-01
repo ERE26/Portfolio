@@ -736,3 +736,41 @@ def test_cooldown_tras_sl(tmp_path, monkeypatch):
     # sin archivo -> conjunto vacio
     monkeypatch.setattr(R, "LOG", str(tmp_path / "noexiste.csv"))
     assert R.tickers_en_cooldown() == set()
+
+
+def test_salidas_regimen_y_tendencia():
+    """regimen_alcista/salida_tendencia: alcista por encima de la media, bajista
+    (y rotura de tendencia) cuando el precio cae por debajo."""
+    import numpy as np, pandas as pd
+    from patrones import salidas as SAL
+    sube = pd.Series(np.linspace(100, 300, 400))           # tendencia alcista
+    baja = pd.Series(np.r_[np.linspace(100, 300, 300), np.linspace(300, 120, 100)])
+    assert bool(SAL.regimen_alcista(sube, n=200).iloc[-1]) is True
+    assert bool(SAL.regimen_alcista(baja, n=200).iloc[-1]) is False
+    assert bool(SAL.salida_tendencia(baja, n=200).iloc[-1]) is True   # rompe su media
+    assert bool(SAL.salida_tendencia(sube, n=200).iloc[-1]) is False
+
+
+def test_salidas_chandelier():
+    """El trailing stop queda por debajo del precio en tendencia; se pierde tras un
+    desplome brusco."""
+    import numpy as np, pandas as pd
+    from patrones import salidas as SAL
+    n = 200
+    close = np.linspace(100, 200, n)
+    df = pd.DataFrame({"high": close * 1.01, "low": close * 0.99, "close": close})
+    assert bool(SAL.salida_chandelier(df).iloc[-1]) is False          # subiendo, no sale
+    df2 = df.copy()
+    df2.loc[df2.index[-1], ["high", "low", "close"]] = [150, 150, 150]  # -25% de golpe
+    assert bool(SAL.salida_chandelier(df2).iloc[-1]) is True           # pierde el trailing
+
+
+def test_regimen_mercado_proxy():
+    """regimen_mercado cae al indice equiponderado si no hay ETF y clasifica bien."""
+    import numpy as np, pandas as pd
+    import operativa as OP
+    idx = pd.date_range("2018-01-01", periods=400, freq="B")
+    sube = {"AAA": pd.DataFrame({"high": np.linspace(10,30,400), "low": np.linspace(10,30,400),
+                                 "close": np.linspace(10,30,400)}, index=idx)}
+    r = OP.regimen_mercado(sube)
+    assert r["indice"] == "equiponderado" and r["alcista"] is True
