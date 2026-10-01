@@ -137,23 +137,47 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     else:
         print("  (ninguna ahora)")
 
-    # rotacion: por cada posicion cerrada, abrir la mejor oportunidad nueva (bracket)
-    if gestionar and rotar and a_cerrar and len(opo):
-        cfg = CONFIG["15Min"]
-        nuevos = opo.head(len(a_cerrar))
-        print("\nRotando capital a nuevas oportunidades:")
-        for _, s in nuevos.iterrows():
-            qty = int(reserva_por_pos / s["precio"])
-            if qty <= 0:
-                continue
-            tp = round(s["precio"] * (1 + cfg["k_pt"] * s["atr_pct"]), 2)
-            sl = round(s["precio"] * (1 - cfg["k_sl"] * s["atr_pct"]), 2)
-            try:
-                r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True)
-                print(f"  LARGO {qty} {s['ticker']} -> TP ${tp} / SL ${sl}  "
-                      f"{'OK '+r.get('id','')[:8] if r.get('id') else r}")
-            except Exception as e:
-                print(f"  {s['ticker']}: error {str(e)[:70]}")
+    # REINVERSION selectiva: mantener el book intradia hasta N posiciones, pero SOLO
+    # con candidatos fuertes. Cubre tanto lo que cerramos por reversion como lo que
+    # cerro solo el bracket al tocar TP/SL. Con cabeza: calidad > cantidad; si no hay
+    # un candidato fuerte, se queda en efectivo (no operar por operar).
+    N_OBJETIVO = 3
+    RVOL_FUERTE = 1.5
+    if gestionar and rotar:
+        held = set(pos) - set(a_cerrar)
+        intradia_vivas = len(rev) - len(a_cerrar)      # brackets que siguen abiertos
+        libres = max(N_OBJETIVO - intradia_vivas, 0)
+        fuertes = opo[(opo["rvol"] >= RVOL_FUERTE) & (~opo["ticker"].isin(held))] if len(opo) else opo
+        if libres and len(fuertes):
+            cfg = CONFIG["15Min"]
+            cash = float(AT.cuenta()["cash"])
+            por_pos = min(reserva_por_pos, cash / libres) if libres else 0.0
+            # mas candidatos de los huecos, por si alguno falla; TP/SL con el precio ACTUAL
+            abrir = fuertes.head(libres + 3)
+            px_now = AT.precio_actual(list(abrir["ticker"]))
+            print(f"\nReinvirtiendo (hasta {libres}) en oportunidades FUERTES (RVOL>={RVOL_FUERTE}):")
+            colocadas = 0
+            for _, s in abrir.iterrows():
+                if colocadas >= libres:
+                    break
+                precio = float(px_now.get(s["ticker"], s["precio"]))   # precio de mercado ahora
+                qty = int(por_pos / precio)
+                if qty <= 0:
+                    continue
+                tp = round(precio * (1 + cfg["k_pt"] * s["atr_pct"]), 2)
+                sl = round(precio * (1 - cfg["k_sl"] * s["atr_pct"]), 2)
+                try:
+                    r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True)
+                    if r.get("id"):
+                        colocadas += 1
+                        print(f"  LARGO {qty} {s['ticker']} @~${precio:.2f} -> TP ${tp} / SL ${sl}  OK")
+                    else:
+                        print(f"  {s['ticker']}: {r}")
+                except Exception as e:
+                    print(f"  {s['ticker']}: salto ({str(e)[:50]})")
+        elif libres:
+            print(f"\n{libres} hueco(s) intradia libre(s), pero sin candidato fuerte "
+                  f"(RVOL>={RVOL_FUERTE}): se mantiene el efectivo (calidad > cantidad).")
 
     print("\nTOP MOMENTUM DIARIO (oportunidades swing):")
     for t, m in escaneo_diario().items():
