@@ -358,7 +358,8 @@ def _predicciones_con_features(mem, banco_sub, con_etiqueta=True):
 
 
 def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
-                 umbral_meta=None, coste_bps=10.0, verbose=True, n_procesos=4, **kw_mem):
+                 umbral_meta=None, coste_bps=10.0, verbose=True, n_procesos=4,
+                 primario="memoria", **kw_mem):
     """Walk-forward de dos etapas: memoria (primario) + meta-modelo (seleccion).
 
     Por cada pliegue de test:
@@ -369,7 +370,7 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
          el meta decide que operaciones tomar
     Mide acierto bruto vs acierto/retorno en las operaciones SELECCIONADas.
     """
-    from .memoria import MemoriaPatrones
+    from .primario import crear_primario
     from .meta import MetaModelo
     from .etiquetado import pesos_unicidad
 
@@ -388,10 +389,11 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
         if m_mem0.sum() < 500 or m_val.sum() < 100 or m_test.sum() < 20:
             continue
 
-        # 1-2) memoria pasado-lejano -> predicciones de validacion -> meta
-        mem0 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem0))
+        # 1-2) primario pasado-lejano -> predicciones de validacion -> meta
+        mem0 = crear_primario(primario, cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem0))
         val = submuestreo_no_solapado(banco.subconjunto(m_val), max(1, cfg.horizonte // 2))
-        gen = (lambda m, b: _predicciones_paralelo(m, b, n_procesos)) if n_procesos > 1 \
+        np_ef = n_procesos if primario == "memoria" else 1  # GBM ya es rapido en batch
+        gen = (lambda m, b: _predicciones_paralelo(m, b, np_ef)) if np_ef > 1 \
             else _predicciones_con_features
         fval, aval, _, _ = gen(mem0, val)
         if len(aval) < 80 or len(np.unique(aval)) < 2:
@@ -403,8 +405,8 @@ def evaluar_meta(banco, n_pliegues=4, k=30, dur_validacion=0.5, paso_test=None,
                               cfg.horizonte) if len(aval) else None
         meta = MetaModelo().entrenar(fval, aval, pesos=wval)
 
-        # 3) memoria con todo el pasado -> test -> seleccion por meta
-        mem1 = MemoriaPatrones(cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem1))
+        # 3) primario con todo el pasado -> test -> seleccion por meta
+        mem1 = crear_primario(primario, cfg, k=k, **kw_mem).ajustar(banco.subconjunto(m_mem1))
         test = submuestreo_no_solapado(banco.subconjunto(m_test), paso_test)
         ftest, atest, itest, idx_test = gen(mem1, test)
         if len(atest) < 10:

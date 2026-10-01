@@ -355,7 +355,8 @@ def cmd_analizar(args):
     print(f"Construyendo banco ({len(pre)} valores)...")
     b = mod_v.construir(pre, ctx, None, cfg, verbose=False, enriquecer=enr)
     print(f"  {len(b)} casos. Evaluando meta-labeling (2 etapas)...")
-    res, imp = evaluacion.evaluar_meta(b, n_pliegues=args.pliegues, k=args.k, verbose=True)
+    res, imp = evaluacion.evaluar_meta(b, n_pliegues=args.pliegues, k=args.k, verbose=True,
+                                       primario=getattr(args, "primario", "memoria"))
     evaluacion.informe_meta(res, titulo="META-LABELING")
 
     print("\n-- Barrido de barreras asimetricas (dimensionado por confianza) --")
@@ -497,6 +498,8 @@ def main(argv=None):
     pan.add_argument("--anos", type=float, default=10.0)
     pan.add_argument("--umbral-meta", type=float, default=0.55)
     pan.add_argument("--con-13f", action="store_true", help="incluye la señal smart money (13F)")
+    pan.add_argument("--primario", default="memoria", choices=["memoria", "gbm", "ensamble"],
+                     help="modelo primario de direccion")
     pan.set_defaults(func=cmd_analizar)
 
     pdl = sub.add_parser("descargar",

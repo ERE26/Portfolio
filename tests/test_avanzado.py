@@ -190,3 +190,51 @@ def test_normalizacion_cross_sectional():
     nz = ey[ey != 0]
     assert len(nz) > 100
     assert abs(nz.mean()) < 0.2 and 0.7 < nz.std() < 1.3   # ~z-score
+
+
+# ------------------------------------------------- primario GBM y ensamble
+def test_primario_gbm_interfaz():
+    """El GBM produce predicciones validas con la misma interfaz que la memoria."""
+    import numpy as np
+    from patrones.primario import PrimarioGBM
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=6, n_barras=1200, semilla=3)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    corte = b.meta.fecha.quantile(0.7)
+    tr = b.subconjunto((b.meta.fecha <= corte).to_numpy())
+    te = b.subconjunto((b.meta.fecha > corte).to_numpy())
+    m = PrimarioGBM(b.cfg).ajustar(tr)
+    p = m.predecir(te, 5)
+    assert 0 <= p.prob_sube <= 1 and 0 <= p.confianza <= 1
+    assert p.ticker and p.fecha is not None
+
+
+def test_gbm_cache_correcto():
+    """El cache de probabilidades del GBM coincide con el calculo directo."""
+    import numpy as np
+    from patrones.primario import PrimarioGBM
+    from patrones.modelos import matriz_supervisada
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=5, n_barras=1100, semilla=1)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    corte = b.meta.fecha.quantile(0.7)
+    tr = b.subconjunto((b.meta.fecha <= corte).to_numpy())
+    te = b.subconjunto((b.meta.fecha > corte).to_numpy())
+    m = PrimarioGBM(b.cfg).ajustar(tr)
+    probs = [m.predecir(te, i).prob_sube_cruda for i in range(50)]
+    X, _, _ = matriz_supervisada(te)
+    pb = m.modelo.predict_proba(X)[:, 1]
+    assert np.allclose(probs, pb[:50], atol=1e-9)
+
+
+def test_ensamble_expone_prob_gbm():
+    """El ensamble expone la prob del GBM como canal para el meta."""
+    import numpy as np
+    from patrones.primario import PrimarioEnsamble
+    pre, meta, idx, reg = datos.generar_universo(n_tickers=6, n_barras=1200, semilla=2)
+    b = ventanas.construir(pre, contexto.Contexto(pre, meta, idx), None, verbose=False)
+    corte = b.meta.fecha.quantile(0.7)
+    tr = b.subconjunto((b.meta.fecha <= corte).to_numpy())
+    te = b.subconjunto((b.meta.fecha > corte).to_numpy())
+    m = PrimarioEnsamble(b.cfg, k=20).ajustar(tr)
+    p = m.predecir(te, 5)
+    assert np.isfinite(p.prob_gbm)
+    assert len(p.vecinos) > 0   # mantiene los vecinos de la memoria

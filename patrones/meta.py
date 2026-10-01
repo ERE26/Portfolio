@@ -43,6 +43,12 @@ def features_meta(pred, banco=None, i=None):
         "mae_esp": pred.mae_esperado,
         "ratio_mfe_mae": pred.mfe_esperado / (abs(pred.mae_esperado) + 1e-6),
     }
+    # si hay modelo GBM, su probabilidad y su acuerdo con la memoria son señal:
+    # dos modelos distintos que coinciden dan mas confianza.
+    if np.isfinite(getattr(pred, "prob_gbm", float("nan"))):
+        f["prob_gbm"] = pred.prob_gbm
+        f["acuerdo_modelos"] = 1.0 - abs(pred.prob_gbm - pred.prob_sube_cruda)
+        f["conviccion_gbm"] = abs(2 * pred.prob_gbm - 1)
     # acuerdo entre grupos: cuanto coinciden las probs por grupo con la global
     if pred.probs_grupo:
         pg = np.array(list(pred.probs_grupo.values()))

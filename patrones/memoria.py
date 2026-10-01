@@ -119,6 +119,7 @@ class Prediccion:
     vecinos: pd.DataFrame
     probs_grupo: dict = field(default_factory=dict)
     atr_pct: float = float("nan")
+    prob_gbm: float = float("nan")      # probabilidad del GBM (si hay ensamble)
 
     def informe(self, n=6):
         """El informe en texto que se imprime por partida."""

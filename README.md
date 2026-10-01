@@ -356,6 +356,41 @@ python bot.py fondos                                         # dossier de los gr
 python bot.py analizar --fuente mercado --con-13f            # análisis con todas las capas
 ```
 
+## Modelo primario: memoria, gradient boosting y ensamble
+
+El modelo primario da la señal de dirección. Hay tres, intercambiables
+(`patrones/primario.py`), todos con la misma interfaz:
+
+- **Memoria de casos** (k-vecinos): explicable, da los vecinos y el "por qué se
+  parece". Buen acierto bruto.
+- **Gradient Boosting** (`PrimarioGBM`): aprende relaciones no lineales entre las
+  54 features. Menor acierto bruto, pero sus probabilidades **discriminan mejor**
+  (cuando dice alta probabilidad, acierta más).
+- **Ensamble** (`PrimarioEnsamble`): mantiene la predicción de la memoria (con sus
+  vecinos) y añade la del GBM como **canal aparte**. La clave: no se promedian las
+  probabilidades (eso diluye la señal), sino que el **meta-modelo aprende a
+  combinarlas**, y el acuerdo entre dos modelos distintos sube la confianza.
+
+Comparación sobre el banco completo (walk-forward, costes, 4 pliegues):
+
+![Modelos primarios](figuras/14_primarios.png)
+
+| Primario | Acierto bruto | Precisión selección | Sharpe | Profit Factor |
+|---|---|---|---|---|
+| Memoria + factores | 52.5% | 60.0% | 1.55 | 1.92 |
+| GBM solo | 47.3% | 64.7% | 1.53 | 1.91 |
+| Ensamble (media ingenua) | 50.9% | 56.2% | 1.30 | 1.73 |
+| **Ensamble (meta combina)** | **52.5%** | **63.9%** | **1.76** | **2.10** |
+
+El ensamble bien construido une el acierto bruto de la memoria con la selección
+fina del GBM: **Sharpe 1.76, Profit Factor 2.10**, el mejor resultado. Lección de
+diseño: ensamblar no es promediar — es dar ambas señales al meta y dejar que
+aprenda a pesarlas.
+
+```bash
+python bot.py analizar --fuente mercado --con-13f --primario ensamble
+```
+
 En la evolución de pesos se ve el aprendizaje en acción: en el pliegue que cubre
 el desplome de 2020, el peso de los **osciladores** salta de 0.08 a 0.46 — el
 sistema se da cuenta solo de que en pánico manda la sobreventa, no la tendencia.
@@ -450,6 +485,7 @@ patrones/
   meta.py                meta-labeling: elegir qué señales operar
   rentabilidad.py        barreras asimétricas, edge por segmento, reglas del sistema
   factores.py            normalización cross-sectional de factores (estilo AQR)
+  primario.py            modelos primarios: memoria, gradient boosting y ensamble
   modelos.py             modelos supervisados de contraste (logística, GBM)
   evaluacion.py          walk-forward, baselines, backtest, calibración, métricas
   simulador.py           bucle de "partidas" que aprende cronológicamente
@@ -466,7 +502,7 @@ fuentes/
   fred.py                FRED: macro de régimen (VIX, curva, crédito)
   form13f.py             smart money: posiciones de los grandes fondos (13F)
   enriquecer.py          combina SEC + FRED + 13F + factores como features
-tests/                   47 tests; el grueso vigila que no se cuele información del futuro
+tests/                   50 tests; el grueso vigila que no se cuele información del futuro
 figuras/                 gráficas del informe
 ```
 
