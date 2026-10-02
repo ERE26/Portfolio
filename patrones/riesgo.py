@@ -47,9 +47,12 @@ LIMITES = {
     "perdida_diaria_reduce": 0.015,  # -1.5% -> REDUCE (no abrir mas, gestionar las abiertas)
     "drawdown_max": 0.10,           # -10% desde el pico -> HALT
     "drawdown_reduce": 0.06,        # -6% -> REDUCE
-    "max_posiciones": 30,           # nº de posiciones concurrentes (proxy debil: solo
-                                    # caza desbocamientos; el riesgo real lo miden
-                                    # exposicion/concentracion/VaR, no el conteo)
+    "max_posiciones": 45,           # nº de posiciones concurrentes (proxy debil anti-
+                                    # desbocamiento). Subido de 30 a 45: con 4 libros
+                                    # (swing ~20 + TSMOM + rotacion + intradia) el tope de
+                                    # 30 asfixiaba al intradia pese a riesgo REAL bajisimo
+                                    # (bruto 0.65x/1.5x, VaR 0.76%/3%). El riesgo de verdad
+                                    # lo miden exposicion/concentracion/VaR, no el conteo.
     "exposicion_bruta_max": 1.5,    # suma |valor|/equity (apalancamiento efectivo)
     "concentracion_max": 0.25,      # peso maximo de UNA posicion
     "var_reduce": 0.03,             # VaR 1d > 3% del equity -> REDUCE (riesgo de cartera)
