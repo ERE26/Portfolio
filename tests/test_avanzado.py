@@ -1146,3 +1146,43 @@ def test_decaimiento_estados():
     assert A.decaimiento(1.1, 1.2, n=50)["estado"] == "OK"
     assert A.decaimiento(0.9, 1.2, n=50)["estado"] == "VIGILAR"
     assert A.decaimiento(0.3, 1.2, n=50)["estado"] == "DEGRADADO"
+
+
+def test_sortino_downside_sobre_objetivo():
+    """Sortino usa la desviacion a la baja sobre el objetivo (0), no la std de los
+    negativos sobre su media: una serie sin retornos negativos -> downside 0 -> inf/nan,
+    y una con cola negativa da un Sortino distinto (y menor) que el Sharpe."""
+    from patrones import analitica as A
+    idx = pd.date_range("2025-01-01", periods=120, freq="B")
+    r = np.where(np.arange(119) % 10 == 0, -0.03, 0.004)   # colas negativas periodicas
+    eq = pd.Series(np.concatenate([[100.0], 100 * np.cumprod(1 + r)]), index=idx)
+    m = A.metricas(eq)
+    assert np.isfinite(m["sortino"])
+    # el sortino penaliza la cola a la baja distinto del sharpe (no identicos)
+    assert abs(m["sortino"] - m["sharpe"]) > 1e-6
+
+
+def test_vs_benchmark_alinea_por_fecha():
+    """El equity de la cuenta llega con hora de cierre y el SPY a medianoche; deben
+    alinearse por FECHA (si no, el merge daba 0 filas y siempre 'insuficiente')."""
+    from patrones import analitica as A
+    dias = pd.date_range("2025-01-01", periods=40, freq="B")
+    eq = pd.Series(100 * np.cumprod(1 + np.random.default_rng(3).normal(0.0004, 0.01, 40)),
+                   index=dias + pd.Timedelta(hours=20))      # hora de cierre
+    bench = pd.Series(100 * np.cumprod(1 + np.random.default_rng(4).normal(0.0003, 0.009, 40)),
+                      index=dias)                             # medianoche
+    vb = A.vs_benchmark(eq, bench)
+    assert not vb.get("insuficiente") and vb["n"] >= 30 and np.isfinite(vb["beta"])
+
+
+def test_slippage_nan_y_consumo(tmp_path):
+    from patrones import analitica as A
+    # entrada con 'entrada' vacia (NaN) no debe colarse
+    log = pd.DataFrame([{"ticker": "AAPL", "ts": "2026-10-02T14:00:00Z", "entrada": float("nan")},
+                        {"ticker": "AAPL", "ts": "2026-10-02T14:00:30Z", "entrada": 100.0},
+                        {"ticker": "AAPL", "ts": "2026-10-02T14:01:00Z", "entrada": 100.0}])
+    fills = [{"symbol": "AAPL", "side": "buy", "price": "100.05", "transaction_time": "2026-10-02T14:00:32Z"},
+             {"symbol": "AAPL", "side": "buy", "price": "100.20", "transaction_time": "2026-10-02T14:01:02Z"}]
+    s, d = A.slippage(log, fills)
+    assert s["n"] == 2                      # la fila NaN se descarta; 2 fills para 2 entradas
+    assert set(d["real"]) == {100.05, 100.20}   # cada fill consumido una sola vez (no reutilizado)

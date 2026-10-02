@@ -29,10 +29,15 @@ def metricas(equity, per=252, rf_anual=0.0):
     rf = rf_anual / per
     ex = r - rf
     mu, sd = ex.mean(), r.std(ddof=1)
-    down = r[r < 0].std(ddof=1)
-    eq = (1 + r).cumprod()
-    maxdd = float((eq / eq.cummax() - 1).min())
-    cagr = float(eq.iloc[-1] ** (per / len(r)) - 1)
+    # downside deviation CORRECTA: dispersion de los retornos bajo el objetivo (0),
+    # no la std de los negativos alrededor de su propia media.
+    dn = np.minimum(ex.to_numpy(), 0.0)
+    down = float(np.sqrt((dn ** 2).mean()))
+    # curva de equity ANCLADA en 1 (incluye el primer periodo) para el drawdown y CAGR
+    eq = np.concatenate([[1.0], (1 + r).cumprod().to_numpy()])
+    picos = np.maximum.accumulate(eq)
+    maxdd = float((eq / picos - 1).min())
+    cagr = float(eq[-1] ** (per / len(r)) - 1)
     return {
         "n": int(len(r)),
         "cagr": cagr,
@@ -43,7 +48,7 @@ def metricas(equity, per=252, rf_anual=0.0):
         "max_drawdown": maxdd,
         "hit_rate": float((r > 0).mean()),
         "mejor_dia": float(r.max()), "peor_dia": float(r.min()),
-        "ret_total": float(eq.iloc[-1] - 1),
+        "ret_total": float(eq[-1] - 1),
     }
 
 
@@ -52,6 +57,15 @@ def vs_benchmark(equity, bench_equity, per=252):
     correlacion e information ratio (retorno activo / tracking error)."""
     r = _ret(equity)
     rb = _ret(bench_equity)
+    # alinear por FECHA: el equity de Alpaca llega con hora de cierre y el SPY de Yahoo
+    # a medianoche -> sin normalizar NUNCA coinciden las etiquetas y el merge daba 0 filas.
+    try:
+        r.index = pd.to_datetime(r.index).normalize()
+        rb.index = pd.to_datetime(rb.index).normalize()
+        r = r[~r.index.duplicated(keep="last")]
+        rb = rb[~rb.index.duplicated(keep="last")]
+    except Exception:
+        pass
     df = pd.DataFrame({"r": r, "rb": rb}).dropna()
     if len(df) < 5:
         return {"n": len(df), "insuficiente": True}
@@ -96,31 +110,40 @@ def slippage(log_df, fills, tol_min=20):
     for f in compras:
         tf = _naive(f.get("transaction_time"))
         if not pd.isna(tf):
-            porfill.setdefault(f.get("symbol"), []).append((tf, float(f["price"])))
+            porfill.setdefault(f.get("symbol"), []).append([tf, float(f["price"]), False])  # [t, precio, usado]
     filas = []
-    for _, row in log_df.iterrows():
+    # emparejar la entrada MAS antigua primero, consumiendo el fill (no reutilizar uno
+    # para dos entradas; parciales: cada entrada toma su fill de compra mas cercano libre)
+    for _, row in log_df.sort_values("ts").iterrows() if "ts" in log_df.columns else log_df.iterrows():
         t = row.get("ticker")
         try:
             esperado = float(row.get("entrada"))
         except Exception:
             continue
+        if not np.isfinite(esperado) or esperado <= 0:   # celda vacia -> NaN; NaN no es falsy
+            continue
         ts = _naive(row.get("ts"))
-        if not esperado or t not in porfill or pd.isna(ts):
+        if t not in porfill or pd.isna(ts):
             continue
-        cand = min(porfill[t], key=lambda x: abs(x[0] - ts))
-        dt_min = abs(cand[0] - ts).total_seconds() / 60
-        if dt_min > tol_min:
+        libres = [c for c in porfill[t] if not c[2]]
+        if not libres:
             continue
-        real = cand[1]
-        filas.append({"ticker": t, "esperado": esperado, "real": real,
-                      "slippage_bps": (real / esperado - 1) * 1e4})
+        cand = min(libres, key=lambda x: abs(x[0] - ts))
+        if abs(cand[0] - ts).total_seconds() / 60 > tol_min:
+            continue
+        cand[2] = True                                   # consumir el fill
+        filas.append({"ticker": t, "esperado": esperado, "real": cand[1],
+                      "slippage_bps": (cand[1] / esperado - 1) * 1e4})
     if not filas:
         return {"n": 0}, pd.DataFrame()
     d = pd.DataFrame(filas)
     s = d["slippage_bps"]
-    return {"n": len(d), "medio_bps": float(s.mean()), "mediana_bps": float(s.median()),
-            "peor_bps": float(s.max()), "p90_bps": float(s.quantile(0.9)),
-            "coste_medio_pct": float(s.mean() / 100)}, d
+    out = {"n": len(d), "medio_bps": float(s.mean()), "mediana_bps": float(s.median()),
+           "coste_medio_pct": float(s.mean() / 100)}
+    if len(d) >= 5:                                       # percentiles solo con muestra decente
+        out["peor_bps"] = float(s.max())
+        out["p90_bps"] = float(s.quantile(0.9))
+    return out, d
 
 
 # ------------------------------------------------- estadisticas de operaciones

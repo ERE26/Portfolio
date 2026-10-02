@@ -38,7 +38,11 @@ def _fmt(x, pct=False, suf=""):
 def _equity_cuenta(period="6M", timeframe="1D"):
     try:
         h = AT.historia_cuenta(period=period, timeframe=timeframe)
-        return h["equity"] if len(h) else pd.Series(dtype=float)
+        if not len(h):
+            return pd.Series(dtype=float)
+        s = h["equity"]
+        s.index = pd.to_datetime(s.index).normalize()   # a FECHA -> alinea con SPY (Yahoo)
+        return s[~s.index.duplicated(keep="last")]
     except Exception as e:
         print(f"[equity] no disponible: {str(e)[:60]}")
         return pd.Series(dtype=float)
@@ -97,10 +101,10 @@ def main(fig=False):
     if sl["n"] == 0:
         print("  Sin entradas emparejables con fills todavia.")
     else:
-        print(f"  {sl['n']} entradas | medio {sl['medio_bps']:+.1f} bps | mediana {sl['mediana_bps']:+.1f} bps | "
-              f"p90 {sl['p90_bps']:+.1f} bps | peor {sl['peor_bps']:+.1f} bps")
-        signo = "coste real (se paga de mas)" if sl['medio_bps'] > 0 else "a favor"
-        print(f"  -> slippage medio {sl['coste_medio_pct']:+.3f}% por entrada ({signo}).")
+        cola = f" | p90 {sl['p90_bps']:+.1f} | peor {sl['peor_bps']:+.1f} bps" if "p90_bps" in sl else "  (n<5: sin percentiles)"
+        print(f"  {sl['n']} entradas | medio {sl['medio_bps']:+.1f} bps | mediana {sl['mediana_bps']:+.1f} bps{cola}")
+        signo = "coste real (se paga de mas)" if sl['mediana_bps'] > 0 else ("a favor" if sl['mediana_bps'] < 0 else "neutro")
+        print(f"  -> slippage mediano {sl['mediana_bps']:+.1f} bps por entrada ({signo}).")
         print(f"     Modelo de costes del backtest: ~spread+comision; contrastar que cubra esto.")
 
     # 3) estadisticas de operaciones (log intradia)

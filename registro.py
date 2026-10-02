@@ -31,7 +31,9 @@ def registrar_entrada(ticker, qty, precio, tp, sl, feats, snapshot=""):
     snapshot: id de la bitacora (bitacora.registrar) con el porque, el patron de
     velas y la foto de la entrada. Enlaza el resultado con su contexto para aprender."""
     os.makedirs("datos", exist_ok=True)
-    fila = {"ts": pd.Timestamp.now().isoformat(), "ticker": ticker, "qty": int(qty),
+    # ts en UTC con zona explicita: los fills de Alpaca son UTC; asi el emparejamiento
+    # de slippage es correcto sea cual sea la zona horaria del host (no asumir UTC).
+    fila = {"ts": pd.Timestamp.now(tz="UTC").isoformat(), "ticker": ticker, "qty": int(qty),
             "entrada": round(float(precio), 4), "tp": tp, "sl": sl,
             "rvol": round(float(feats.get("rvol", float("nan"))), 3),
             "dist_vwap": round(float(feats.get("dist_vwap", float("nan"))), 5),
