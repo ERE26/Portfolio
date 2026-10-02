@@ -1,13 +1,16 @@
-"""RADAR DE GANADORES DEL MERCADO (cada ~15 min). Mira los MAYORES ganadores de TODO el
-mercado US (no solo nuestro universo), qué han hecho en los últimos ~15 min, y POR QUÉ
-nosotros no los compramos o no estaban en el radar. Sirve para detectar PUNTOS CIEGOS
-(valores fuera de nuestro universo) y revisar los gates con casos reales.
+"""RADAR DE GANADORES DE LA ÚLTIMA HORA (cada ~15 min), sobre TODO EL MERCADO US.
 
-Auto-limitado: no repite si el último pase fue hace < dias_min minutos (estado en
-datos/radar_last.json), para que el bucle pueda llamarlo cada ciclo sin coste.
+Fuente primaria: TradingView (escáner público, ~2.5-3k valores en una llamada) rankeados
+por el cambio intradía de la última hora (sin el hueco de apertura), filtrados por liquidez
+(precio, $-volumen, RVOL). Si TradingView falla, cae a un pool de Yahoo (most_actives +
+gainers) con el 1h calculado por barras de Alpaca.
 
-  python radar_ganadores.py          # corre si han pasado >= 14 min
-  python radar_ganadores.py --force  # fuerza
+Para cada top-gainer dice POR QUÉ no operamos ahí: dentro de nuestro universo -> el gate
+que falla / en cartera / cooldown / 'PASARÍA pero sin hueco/REDUCE'; fuera -> PUNTO CIEGO.
+
+Auto-limitado (datos/radar_last.json, >= dias_min min) para que el bucle lo llame cada ciclo.
+
+  python radar_ganadores.py [--force]
 """
 import json
 import os
@@ -16,13 +19,8 @@ import sys
 import pandas as pd
 
 import gestionar as G
-from operativa_intradia import CONFIG
-from fuentes import alpaca_trade as AT
-from fuentes.http import Cliente
 
 ESTADO = "datos/radar_last.json"
-URL = ("https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-       "?scrIds=day_gainers&count=25")
 
 
 def _ultimo():
@@ -37,36 +35,9 @@ def _marcar():
     json.dump({"ts": pd.Timestamp.now().isoformat()}, open(ESTADO, "w"))
 
 
-def _ganadores_mercado(cli, n=15):
-    """Mayores ganadores del mercado US hoy (screener gratuito de Yahoo)."""
-    d = cli.get_json(URL, headers={"User-Agent": "Mozilla/5.0"}, cache=False)
-    q = d["finance"]["result"][0]["quotes"]
-    out = []
-    for x in q:
-        out.append({"t": x.get("symbol"), "dia": float(x.get("regularMarketChangePercent", 0.0)),
-                    "precio": x.get("regularMarketPrice"), "vol": float(x.get("regularMarketVolume", 0) or 0),
-                    "nombre": (x.get("shortName") or "")[:26]})
-    return out[:n]
-
-
-def _delta_15m(ticker):
-    """Movimiento en los últimos ~15 min (última vela 15m vs la previa). None si no hay."""
-    try:
-        from fuentes import alpaca
-        dsd = (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-        df = alpaca.historico(ticker, "15Min", desde=dsd, max_paginas=2)
-        c = df["close"].astype(float)
-        if len(c) >= 2:
-            return float(c.iloc[-1] / c.iloc[-2] - 1.0)
-    except Exception:
-        pass
-    return None
-
-
 def _motivo_no_compra(t, universo, held, cooldown, mkt, rvol_fuerte):
-    """Por qué NO lo compramos (si está en el universo); o que es punto ciego (fuera)."""
     if t not in universo:
-        return "FUERA DE UNIVERSO", "no está en nuestros ~114 (punto ciego)"
+        return "FUERA", "punto ciego: no está en nuestros ~114"
     if t in held:
         return "en cartera", "ya la tenemos"
     if t in cooldown:
@@ -74,13 +45,13 @@ def _motivo_no_compra(t, universo, held, cooldown, mkt, rvol_fuerte):
     try:
         s = G.señal(t, "15Min")
     except Exception:
-        return "sin datos 15m", "no hay velas suficientes"
+        return "sin datos", "sin velas 15m suficientes"
     rv, dv, rs = s["rvol"], s["dist_vwap"], s["ret_sesion"]
     atr = s.get("atr_pct", 0.0)
     fr = rs - mkt
     ext = dv / atr if atr > 0 else 0.0
     if rv < rvol_fuerte:
-        return "descartada", f"RVOL {rv:.2f} < {rvol_fuerte} (volumen no anormal p/ nosotros)"
+        return "descartada", f"RVOL {rv:.2f} < {rvol_fuerte}"
     if dv <= 0:
         return "descartada", f"bajo VWAP ({dv*100:+.2f}%)"
     if not (0 < ext < G.EXT_MAX):
@@ -89,45 +60,89 @@ def _motivo_no_compra(t, universo, held, cooldown, mkt, rvol_fuerte):
         return "descartada", f"fuerza rel {fr*100:+.2f}% <= +{G.MARGEN_FR*100:.1f}%"
     if rs < G.RET_MIN:
         return "descartada", f"sesión {rs*100:+.2f}% < +{G.RET_MIN*100:.1f}%"
-    return "PASARÍA", "pasa la confluencia (no entró por hueco lleno / REDUCE o cooldown de slot)"
+    return "PASARÍA", "pasa confluencia; no entró por hueco lleno / REDUCE"
 
 
-def ejecutar(force=False, dias_min=14):
+def _ganadores(top):
+    """(filas, fuente, total_mercado). Intenta TradingView (todo el mercado); si falla, Yahoo."""
+    try:
+        from fuentes import tradingview as TV
+        g, total = TV.ganadores_intradia(tf="60", n=top)
+        if g:
+            filas = [{"t": x["symbol"], "h1": (x["chg_tf"] or 0) / 100.0,
+                      "m15": (x["chg_15"] or 0) / 100.0, "dia": (x["chg_dia"] or 0) / 100.0,
+                      "rvol": x.get("rvol"), "dvol": x["dvol"], "sector": x["sector"]} for x in g]
+            return filas, f"TradingView · {total} valores del mercado", total
+    except Exception as e:
+        print(f"  (TradingView no disponible: {str(e)[:60]}; uso pool de Yahoo)")
+    # ---- fallback: pool Yahoo + 1h por barras de Alpaca ----
+    from fuentes.http import Cliente
+    from fuentes import alpaca
+    cli = Cliente()
+    syms, nombre = [], {}
+    for scr in ["most_actives", "day_gainers", "small_cap_gainers"]:
+        try:
+            d = cli.get_json(f"https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds={scr}&count=50",
+                             headers={"User-Agent": "Mozilla/5.0"}, cache=False)
+            for q in d["finance"]["result"][0]["quotes"]:
+                s = q.get("symbol")
+                if s and s not in nombre:
+                    nombre[s] = 1; syms.append(s)
+        except Exception:
+            continue
+    desde = (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    filas = []
+    for t in syms[:120]:
+        try:
+            cl = alpaca.historico(t, "15Min", desde=desde, max_paginas=2)["close"].astype(float)
+            if len(cl) >= 5:
+                filas.append({"t": t, "h1": float(cl.iloc[-1] / cl.iloc[-5] - 1), "m15": float(cl.iloc[-1] / cl.iloc[-2] - 1),
+                              "dia": float("nan"), "dvol": float("nan"), "sector": ""})
+        except Exception:
+            continue
+    filas.sort(key=lambda x: -x["h1"])
+    return filas[:top], f"Yahoo pool · {len(syms)} activos", len(syms)
+
+
+def ejecutar(force=False, dias_min=14, top=12):
     ult = _ultimo()
     if not force and ult is not None and (pd.Timestamp.now() - ult).total_seconds() < dias_min * 60:
-        mins = (pd.Timestamp.now() - ult).total_seconds() / 60
-        print(f"RADAR: último pase hace {mins:.0f} min (<{dias_min}); no toca.")
+        print(f"RADAR 1h: último pase hace {(pd.Timestamp.now()-ult).total_seconds()/60:.0f} min (<{dias_min}); no toca.")
         return
-    cli = Cliente()
-    try:
-        gan = _ganadores_mercado(cli)
-    except Exception as e:
-        print(f"RADAR: no se pudo leer el screener de ganadores ({str(e)[:60]}).")
+    filas, fuente, _ = _ganadores(top)
+    if not filas:
+        print("RADAR 1h: sin datos.")
+        _marcar()
         return
+    from fuentes import alpaca_trade as AT
+    from registro import tickers_en_cooldown, cargar_umbral
     universo = set(G.universo_dinamico())
     held = set(AT.posiciones())
-    from registro import tickers_en_cooldown, cargar_umbral
     cooldown = tickers_en_cooldown(minutos=60)
     mkt = G._ret_sesion_mercado("15Min")
     rvol_fuerte = cargar_umbral(1.5)
 
-    print(f"RADAR DE GANADORES DEL MERCADO | top {len(gan)} del día | mercado (SPY) {mkt*100:+.2f}%")
-    print(f"  {'ticker':<7}{'día':>8}{'15min':>8}{'vol':>8}  por qué NO nosotros")
+    print(f"RADAR · MAYORES GANADORES DE LA ÚLTIMA HORA (sin apertura) | fuente: {fuente} | "
+          f"mercado (SPY) {mkt*100:+.2f}%")
+    print(f"  {'ticker':<7}{'1h':>8}{'15m':>8}{'RVOL':>6}{'$vol(M)':>9}  por qué NO nosotros")
     fuera = 0
-    for g in gan:
-        t = g["t"]
-        d15 = _delta_15m(t)
-        est, motivo = _motivo_no_compra(t, universo, held, cooldown, mkt, rvol_fuerte)
-        if est == "FUERA DE UNIVERSO":
+    pasarian = []
+    for g in filas:
+        est, mot = _motivo_no_compra(g["t"], universo, held, cooldown, mkt, rvol_fuerte)
+        if est == "FUERA":
             fuera += 1
-        d15s = f"{d15*100:+.1f}%" if d15 is not None else "—"
-        print(f"  {t:<7}{g['dia']:>+7.1f}%{d15s:>8}{g['vol']/1e6:>6.1f}M  [{est}] {motivo}")
-    print(f"\n  Resumen: {fuera}/{len(gan)} de los mayores ganadores están FUERA de nuestro "
-          f"universo (punto ciego). El resto, por qué no, arriba.")
-    if fuera >= len(gan) * 0.6:
-        print("  -> La mayoría de los grandes movimientos del día son valores que NO miramos "
-              "(small/mid-caps). Decisión a valorar: ampliar universo o aceptar que operamos "
-              "solo líquidos grandes (menos sorpresa, menos oportunidad).")
+        if est == "PASARÍA":
+            pasarian.append(g["t"])
+        fl = "↑" if (g["m15"] or 0) > 0.001 else "↓" if (g["m15"] or 0) < -0.001 else "→"
+        rv = f"{g['rvol']:.1f}" if g.get("rvol") else "—"
+        dv = f"{g['dvol']/1e6:.1f}" if g.get("dvol") and g["dvol"] == g["dvol"] else "—"
+        sec = f"  · {g['sector']}" if g.get("sector") else ""
+        print(f"  {g['t']:<7}{g['h1']*100:>+7.2f}%{g['m15']*100:>+7.2f}%{fl}{rv:>6}{dv:>9}  [{est}] {mot}{sec}")
+    print(f"\n  Resumen: de los {len(filas)} que más subieron la última hora, {fuera} FUERA de "
+          f"nuestro universo; {len(filas)-fuera} dentro.")
+    if pasarian:
+        print(f"  OJO: {pasarian} pasaban la confluencia y no entraron solo por hueco/REDUCE "
+              f"-> ahí sí perdimos una entrada válida.")
     _marcar()
 
 
