@@ -1175,6 +1175,44 @@ def test_vs_benchmark_alinea_por_fecha():
     assert not vb.get("insuficiente") and vb["n"] >= 30 and np.isfinite(vb["beta"])
 
 
+def test_regimen_vix_estados():
+    from patrones import regimen as RG
+    assert RG.regimen_vix(vix=15, vix3m=18)["estado"] == "contango"       # ratio<1
+    assert RG.regimen_vix(vix=15, vix3m=18)["risk_on"] is True
+    assert RG.regimen_vix(vix=30, vix3m=28)["estado"] == "backwardation"   # ratio>1
+    assert RG.regimen_vix(vix=30, vix3m=28)["risk_on"] is False
+    assert RG.regimen_vix(vix=32, vix3m=35)["estado"] == "VIX alto"        # nivel alto aunque contango
+    assert RG.regimen_vix(vix=32, vix3m=35)["risk_on"] is False
+
+
+def test_vol_managed_escala_inversa_a_vol():
+    from patrones import regimen as RG
+    # serie muy tranquila -> vol baja -> escala sube (hacia el cap); serie agitada -> baja
+    idx = pd.date_range("2025-01-01", periods=120, freq="B")
+    calma = pd.Series(100 * np.cumprod(1 + np.full(120, 0.0003)), index=idx)  # casi sin vol
+    rng = np.random.default_rng(0)
+    agitada = pd.Series(100 * np.cumprod(1 + rng.normal(0, 0.03, 120)), index=idx)
+    e_calma, _ = RG.vol_managed_escala(calma)
+    e_agit, _ = RG.vol_managed_escala(agitada)
+    assert e_calma > e_agit                        # menos vol -> mas exposicion
+    assert 0.0 <= e_agit <= RG.CAP and 0.0 <= e_calma <= RG.CAP
+
+
+def test_multiplicador_recorta_en_riskoff():
+    from patrones import regimen as RG
+    idx = pd.date_range("2025-01-01", periods=120, freq="B")
+    spy = pd.Series(100 * np.cumprod(1 + np.random.default_rng(1).normal(0.0003, 0.012, 120)), index=idx)
+    # inyecta un VIX de estres (monkeypatch de regimen_vix)
+    import patrones.regimen as mod
+    orig = mod.regimen_vix
+    mod.regimen_vix = lambda **k: {"vix": 35, "vix3m": 30, "ratio": 35 / 30, "estado": "backwardation", "risk_on": False}
+    try:
+        m = RG.multiplicador(precios_mercado=spy)
+        assert m["factor_vix"] == 0.5 and m["mult"] <= RG.CAP
+    finally:
+        mod.regimen_vix = orig
+
+
 def test_slippage_nan_y_consumo(tmp_path):
     from patrones import analitica as A
     # entrada con 'entrada' vacia (NaN) no debe colarse

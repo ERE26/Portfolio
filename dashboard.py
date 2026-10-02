@@ -84,6 +84,19 @@ def _ohlc(ticker, cli, n=70, nombre=None):
         return {}
 
 
+def _regimen(cli):
+    """Overlay de regimen (gestion de vol + VIX). Multiplicador de exposicion sugerido."""
+    try:
+        from patrones.regimen import multiplicador
+        m = multiplicador(cli=cli)
+        vx = m.get("vix", {})
+        return {"mult": m["mult"], "vol_managed": m["vol_managed"], "factor_vix": m.get("factor_vix"),
+                "vol_realizada": m.get("vol_realizada"), "vix": vx.get("vix"), "vix3m": vx.get("vix3m"),
+                "ratio": vx.get("ratio"), "estado": vx.get("estado"), "risk_on": vx.get("risk_on")}
+    except Exception:
+        return {}
+
+
 def _modelo():
     """Cache de inteligencia del modelo (importancias + edge matrix), generado por
     modelo.py (lento, se regenera a diario). Si no existe, se omite la seccion."""
@@ -256,6 +269,7 @@ def reunir():
         "sectores": sectores,
         "top_movers": top_movers,
         "watchlist": _watchlist(),
+        "regimen": _regimen(cli),
         "modelo": _modelo(),
         "calendario": _calendario(cli),
         "mercado": _mercado(cli),

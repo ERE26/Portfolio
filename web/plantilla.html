@@ -159,6 +159,7 @@
           <div class="panel"><div class="ph"><h3>Capital</h3></div><div class="pb"><div class="donutwrap"><div id="donut"></div><div class="leg" id="donutleg"></div></div></div></div>
           <div class="panel"><div class="ph"><h3>Rendimiento</h3><span class="t" id="perftag"></span></div><div class="pb"><div class="kv" id="perf"></div></div></div>
         </div>
+        <div class="panel" id="regpanel" style="margin-top:14px"><div class="ph"><h3>Régimen de mercado · overlay de volatilidad</h3><span id="regpill"></span></div><div class="pb"><div id="regbody"></div></div></div>
       </div>
 
       <div class="sec" id="cartera">
@@ -303,6 +304,25 @@ let perf=ts.insuficiente?[kr("Tear-sheet","muestra insuficiente","muted"),kr("Se
  :[kr("Sharpe",sgn(ts.sharpe),ts.sharpe>0?"up":"down"),kr("Sortino",sgn(ts.sortino)),kr("Calmar",sgn(ts.calmar)),kr("Max DD",pct(ts.max_drawdown),"down"),kr("CAGR",pct(ts.cagr),cls(ts.cagr))];
 perf=perf.concat([kr("Ops. cerradas",String(op.n||0)),kr("Hit-rate",op.n?pct(op.hit_rate,0):"—",op.hit_rate>=0.5?"up":"warn"),kr("Profit factor",op.n?(op.profit_factor||0).toFixed(2):"—",op.profit_factor>=1?"up":"down"),kr("Slippage",op.slippage_bps==null?"—":sgn(op.slippage_bps,1)+" bps",(op.slippage_bps||0)>5?"warn":"up")]);
 $("perf").innerHTML=perf.join("");
+
+// ---------- regimen de mercado (overlay de volatilidad) ----------
+(function(){
+  const rg=DATA.regimen||{};
+  if(rg.mult==null){$("regpanel").style.display="none";return;}
+  const on=rg.risk_on, est=rg.estado||"s/d";
+  const pc=on?"p-GO":"p-HALT";
+  $("regpill").innerHTML=`<span class="pill ${pc}"><span class="led"></span>${on?'RISK-ON':'RISK-OFF'}</span>`;
+  const aplicado=Math.max(0.3,Math.min(1.0,rg.mult));  // conservador: solo recorta
+  const st=(k,v,c2)=>`<div style="flex:1;min-width:120px"><div class="faint" style="font-size:10px;letter-spacing:.1em;text-transform:uppercase">${k}</div><div style="font-size:16px;font-weight:800;margin-top:3px" class="${c2||''}">${v}</div></div>`;
+  $("regbody").innerHTML=`<div style="display:flex;gap:16px;flex-wrap:wrap">
+    ${st("VIX",rg.vix!=null?rg.vix.toFixed(2):"—",rg.vix>=28?"down":"")}
+    ${st("VIX3M",rg.vix3m!=null?rg.vix3m.toFixed(2):"—")}
+    ${st("Estructura",est,on?"up":"down")}
+    ${st("Vol-managed",rg.vol_managed!=null?rg.vol_managed.toFixed(2)+"x":"—")}
+    ${st("Exposición sugerida",aplicado.toFixed(2)+"x",aplicado<0.99?"down":"up")}
+  </div>
+  <div class="faint" style="font-size:11px;margin-top:10px;font-weight:600">Overlay validado (SPY 1993-26, DSR 1.0): gestión de vol + estructura temporal del VIX. ${on?'Contango/calma → sin recorte.':'Estrés de mercado → el sistema reduce el tamaño de las nuevas posiciones (preservación de capital).'}</div>`;
+})();
 
 const pos=DATA.posiciones||[];
 const heat=u=>{const a=Math.min(.82,.14+Math.abs(u)/0.03*.6);return u>=0?`rgba(22,199,132,${a})`:`rgba(246,70,93,${a})`;};

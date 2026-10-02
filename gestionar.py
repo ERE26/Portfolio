@@ -338,6 +338,18 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
             cfg = CONFIG["15Min"]
             cash = float(AT.cuenta()["cash"])
             por_pos = min(reserva_por_pos, cash / libres) if libres else 0.0
+            # OVERLAY DE REGIMEN (gestion de vol + VIX, validado SPY 1993-26): recorta
+            # el tamaño en estres de mercado. Conservador: SOLO reduce (clip a [0.3, 1.0]),
+            # nunca apalanca. En calma/contango queda 1.0; en vol alta / backwardation baja.
+            try:
+                from patrones.regimen import multiplicador as _mult
+                _rg = _mult()
+                _m = max(0.3, min(1.0, _rg["mult"]))
+                if _m < 0.99:
+                    por_pos *= _m
+                    print(f"[régimen] {_rg['nota']} -> tamaño ×{_m:.2f} (preservación de capital)")
+            except Exception as e:
+                print(f"[régimen] no evaluado ({str(e)[:40]}); tamaño sin recorte.")
             # mas candidatos de los huecos, por si alguno falla; TP/SL con el precio ACTUAL
             abrir = fuertes.head(libres + 3)
             px_now = AT.precio_actual(list(abrir["ticker"]))
