@@ -17,9 +17,16 @@ import numpy as np
 import pandas as pd
 
 from fuentes import alpaca, alpaca_trade as AT
+from fuentes.http import Cliente
 from patrones import indicadores as ind
 from patrones.intradia import rasgos_intradia, rvol
 from operativa_intradia import CONFIG, LIQUIDOS
+
+# Cliente con TTL CORTO para las barras intradía: sin esto, alpaca.historico usa un
+# Cliente con caché de 30 días y la señal (VWAP, sesión, RVOL, pendiente) queda
+# CONGELADA desde el primer escaneo del día. 45s deduplica dentro de un ciclo y
+# refresca de un ciclo al siguiente (cada ~5 min).
+_CLI_INTRA = Cliente(ttl=45)
 
 # universo ampliado: cuantos mas valores miremos, mas podemos ELEGIR los mejores
 # (el filtro de calidad decide, no el tamano del universo). Grandes + varios sectores.
@@ -66,6 +73,37 @@ RESERVADOS_TSMOM = {"SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "HYG"}
 RESERVADOS_ROTACION = {"EWG", "EWQ", "EWP", "EWU", "EWI", "EWN", "EWL", "EWD", "EWO", "EWK"}
 RESERVADOS = RESERVADOS_TSMOM | RESERVADOS_ROTACION
 
+CACHE_UNIVERSO = "datos/universo_ampliado.json"
+
+
+def _universo_tv(max_horas=20, n=300):
+    """Las ~n acciones US MÁS LÍQUIDAS (TradingView: grandes + mid-caps líquidas),
+    cacheadas ~a diario. AMPLÍA el universo operable sin depender de TV cada ciclo y sin
+    escanear a ciegas. Fallback robusto: caché (aunque vieja) si TV falla; [] si nada."""
+    import json
+    import os
+    cache = None
+    try:
+        cache = json.load(open(CACHE_UNIVERSO))
+        edad_h = (pd.Timestamp.now() - pd.Timestamp(cache["ts"])).total_seconds() / 3600
+        if edad_h < max_horas and cache.get("symbols"):
+            return list(cache["symbols"])
+    except Exception:
+        cache = None
+    try:
+        from fuentes import tradingview as TV
+        syms = TV.universo_liquido(n=n)
+        if syms:
+            os.makedirs("datos", exist_ok=True)
+            json.dump({"ts": pd.Timestamp.now().isoformat(), "symbols": syms}, open(CACHE_UNIVERSO, "w"))
+            return syms
+    except Exception:
+        pass
+    try:
+        return list(cache["symbols"]) if cache and cache.get("symbols") else []
+    except Exception:
+        return []
+
 
 def universo_dinamico(con_europa=True):
     """Universo operable = base (EE.UU.) + EUROPA (ADRs/ETFs europeos cotizados en
@@ -77,7 +115,7 @@ def universo_dinamico(con_europa=True):
         extra = watchlist_vigente()
     except Exception:
         extra = []
-    u = set(UNIVERSO) | set(extra)
+    u = set(UNIVERSO) | set(extra) | set(_universo_tv())   # + mid-caps líquidas (TradingView)
     if con_europa:
         u |= set(EUROPA)
     return sorted(u - RESERVADOS)      # excluye reservados del Libro C (TSMOM) y D (rotacion)
@@ -89,7 +127,7 @@ def señal(ticker, intervalo="15Min"):
     bajada organica puntual."""
     cfg = CONFIG[intervalo]
     desde = (pd.Timestamp.now() - pd.Timedelta(days=cfg["dias"])).strftime("%Y-%m-%d")
-    df = alpaca.historico(ticker, intervalo, desde=desde, max_paginas=6)
+    df = alpaca.historico(ticker, intervalo, desde=desde, max_paginas=6, cliente=_CLI_INTRA)
     if len(df) < 20:
         raise RuntimeError("pocos datos")
     r = rasgos_intradia(df)
@@ -186,17 +224,39 @@ def _ret_sesion_mercado(intervalo="15Min", benchmark="SPY"):
         return 0.0
 
 
-def escanear(intervalo="15Min", excluir=(), n=12):
-    """Nuevas oportunidades intradia en el universo ampliado (no en cartera).
+def _candidatos_intradia(excluir=()):
+    """Pool de candidatos intradía = acciones LÍQUIDAS EN JUEGO de TODO el mercado
+    (TradingView, una llamada), en vez de iterar una lista fija de ~114. Si TradingView
+    falla, cae al universo ampliado cacheado. Siempre menos reservados (Libros C/D) y los
+    excluidos (ya en cartera). Acota el coste a los que de verdad se mueven hoy."""
+    syms = []
+    try:
+        from fuentes import tradingview as TV
+        syms = TV.en_juego()
+    except Exception:
+        syms = []
+    if not syms:
+        syms = universo_dinamico()                # fallback robusto (lista ampliada)
+    ex = set(excluir) | RESERVADOS
+    # dedup preservando orden (TV ya viene por RVOL desc)
+    vistos, out = set(), []
+    for t in syms:
+        if t in ex or t in vistos:
+            continue
+        vistos.add(t); out.append(t)
+    return out
 
-    Añade a cada candidato la FUERZA RELATIVA (vs el mercado) y la EXTENSION sobre
-    el VWAP en ATRs, para que la seleccion use mas indicadores que el RVOL."""
+
+def escanear(intervalo="15Min", excluir=(), n=12):
+    """Nuevas oportunidades intradia en TODO el mercado líquido en juego (no en cartera).
+
+    Candidatos: `_candidatos_intradia` (TradingView, mercado completo). A cada uno se le
+    añade la FUERZA RELATIVA (vs el mercado) y la EXTENSION sobre el VWAP en ATRs, para que
+    la seleccion use mas indicadores que el RVOL."""
     cfg = CONFIG[intervalo]
     mkt = _ret_sesion_mercado(intervalo)          # retorno del mercado hoy (SPY)
     filas = []
-    for t in universo_dinamico():
-        if t in excluir:
-            continue
+    for t in _candidatos_intradia(excluir):
         try:
             s = señal(t, intervalo)
         except Exception:

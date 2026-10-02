@@ -32,6 +32,43 @@ def scan(columns, sort_by, filtros=None, n=50, orden="desc", timeout=25):
     return out, int(j.get("totalCount", 0))
 
 
+def universo_liquido(n=300, min_precio=5.0, min_dvol=15_000_000.0, min_avgvol=1_000_000.0):
+    """Las ~n acciones US MÁS LÍQUIDAS (por $-volumen): grandes + mid-caps líquidas. Para
+    AMPLIAR el universo operable más allá de una lista fija. Filtra por precio, $-volumen
+    y volumen medio (ejecutable intradía), type=stock y símbolo primario (sin duplicados
+    de clases). Devuelve lista de símbolos ordenada por $-volumen desc."""
+    cols = ["name", "Value.Traded", "market_cap_basic"]
+    filtros = [
+        {"left": "close", "operation": "in_range", "right": [min_precio, 5000]},
+        {"left": "Value.Traded", "operation": "greater", "right": min_dvol},
+        {"left": "average_volume_10d_calc", "operation": "greater", "right": min_avgvol},
+        {"left": "type", "operation": "equal", "right": "stock"},
+        {"left": "is_primary", "operation": "equal", "right": True},
+    ]
+    rows, _ = scan(cols, sort_by="Value.Traded", filtros=filtros, n=n)
+    return [d["symbol"] for d in rows if d.get("symbol")]
+
+
+def en_juego(n=120, min_precio=4.0, min_dvol=4_000_000.0, min_avgvol=400_000.0, min_rvol=1.1):
+    """Acciones US LÍQUIDAS que están EN JUEGO ahora (RVOL alto y subiendo hoy), de TODO
+    el mercado, en una sola llamada. Es el POOL DE CANDIDATOS intradía: en vez de iterar
+    una lista fija de ~114, se evalúan los que de verdad se mueven hoy (sean los de
+    siempre o mid-caps nuevas). Nuestros gates (sobre barras frescas de Alpaca) deciden
+    luego cuál se opera. Devuelve símbolos ordenados por RVOL desc."""
+    cols = ["name", "relative_volume_10d_calc", "change", "Value.Traded"]
+    filtros = [
+        {"left": "close", "operation": "in_range", "right": [min_precio, 5000]},
+        {"left": "Value.Traded", "operation": "greater", "right": min_dvol},
+        {"left": "average_volume_10d_calc", "operation": "greater", "right": min_avgvol},
+        {"left": "relative_volume_10d_calc", "operation": "greater", "right": min_rvol},
+        {"left": "change", "operation": "greater", "right": 0},
+        {"left": "type", "operation": "equal", "right": "stock"},
+        {"left": "is_primary", "operation": "equal", "right": True},
+    ]
+    rows, _ = scan(cols, sort_by="relative_volume_10d_calc", filtros=filtros, n=n)
+    return [d["symbol"] for d in rows if d.get("symbol")]
+
+
 def ganadores_intradia(tf="60", n=15, min_precio=3.0, min_dvol=1_000_000.0, min_rvol=1.2):
     """Mayores ganadores del mercado en el timeframe intradía `tf` minutos (60 = última
     hora, sin la apertura: es el cambio dentro de la vela intradía en curso). Filtrado por
