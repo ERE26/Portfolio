@@ -1,0 +1,17 @@
+# Despliegue del terminal en Render (plan gratuito). Ver docs/desplegar_web.md.
+services:
+  - type: web
+    name: ilegalisimo-terminal
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn serve:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APCA_API_KEY_ID      # clave PAPER de Alpaca (empieza por PK). Secreta.
+        sync: false
+      - key: APCA_API_SECRET_KEY  # secreto de Alpaca. Secreta.
+        sync: false
+      - key: DASH_USER            # usuario para proteger el panel (recomendado)
+        sync: false
+      - key: DASH_PASS            # contraseña del panel
+        sync: false

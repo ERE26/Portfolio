@@ -127,6 +127,7 @@
       <a href="#resumen" class="on"><span class="ic">▣</span>Resumen</a>
       <a href="#cartera"><span class="ic">▤</span>Cartera</a>
       <a href="#riesgo"><span class="ic">◆</span>Riesgo</a>
+      <a href="#modelo"><span class="ic">⬡</span>Modelo</a>
       <a href="#mercado"><span class="ic">◈</span>Mercado</a>
       <a href="#calendario"><span class="ic">◷</span>Calendario</a>
       <a href="#noticias"><span class="ic">≣</span>Noticias</a>
@@ -172,6 +173,14 @@
             <div class="panel"><div class="ph"><h3>Movers del día</h3></div><div class="pb"><div class="movers" id="movers"></div></div></div>
             <div class="panel"><div class="ph"><h3>Por libro</h3></div><div class="pb"><div class="kv" id="books"></div></div></div>
           </div>
+        </div>
+      </div>
+
+      <div class="sec" id="modelo">
+        <div class="sect">Modelo · cómo decide</div>
+        <div class="grid2">
+          <div class="panel"><div class="ph"><h3>Importancia de features (meta-labeling)</h3><span class="t" id="modeltag"></span></div><div class="pb"><div id="fnet"></div></div></div>
+          <div class="panel"><div class="ph"><h3>Edge matrix · confianza vs resultado</h3><span class="t" id="edgetag"></span></div><div class="pb"><div id="edge"></div><div id="calib"></div></div></div>
         </div>
       </div>
 
@@ -316,6 +325,48 @@ $("cal").innerHTML=cal.length?cal.map(e=>`<div class="cev"><span class="tm">${(e
 
 const nw=DATA.noticias||[];
 $("news").innerHTML=nw.length?nw.map(x=>{const host=x.url?(()=>{try{return new URL(x.url).hostname.replace("www.","")}catch(e){return""}})():"";const tt=x.url?`<a href="${x.url}" target="_blank" rel="noopener">${x.titular}</a>`:x.titular;return `<div class="ni"><span class="sd" style="background:${col(x.punt)}"></span><div style="min-width:0"><div class="tt">${tt}</div><div class="mt"><span class="sym">${x.ticker}</span><span>${x.fuente||host||"—"}</span><span>${x.fecha||""}</span></div></div></div>`;}).join(""):`<div class="muted">Sin titulares.</div>`;
+
+// ---------- modelo: red de importancia + edge matrix ----------
+const MD=DATA.modelo||{};
+(function(){
+  const imp=MD.importancias||[],box=$("fnet");
+  $("modeltag").textContent=MD.generado?("AUC "+(MD.auc!=null?MD.auc:"—")+" · "+(MD.n_casos||0)+" casos"):"sin datos";
+  if(!imp.length){box.innerHTML="<div class='muted' style='padding:34px 8px'>Ejecuta <b>modelo.py</b> para generar la red (se cachea a diario).</div>";return;}
+  const W=560,H=Math.max(230,imp.length*25+24),P={t:14,b:14},LX=168,MX=W-120;
+  const mx=Math.max(...imp.map(i=>Math.abs(i.peso)))||1,fy=i=>P.t+(H-P.t-P.b)*((i+0.5)/imp.length),my=H/2;
+  let ed="",no="";
+  imp.forEach((it,i)=>{const y=fy(i),w=(0.6+Math.abs(it.peso)/mx*5.5).toFixed(1),op=(0.16+Math.abs(it.peso)/mx*0.62).toFixed(2),cxm=(LX+MX)/2;
+    ed+=`<path d="M ${LX} ${y.toFixed(1)} C ${cxm} ${y.toFixed(1)}, ${cxm} ${my}, ${MX} ${my}" fill="none" stroke="var(--accent)" stroke-width="${w}" opacity="${op}"/>`;
+    no+=`<circle cx="${LX}" cy="${y.toFixed(1)}" r="3.4" fill="var(--accent)"/><text x="${LX-9}" y="${(y+3.6).toFixed(1)}" text-anchor="end" fill="var(--fg)" font-size="11.5">${it.feat}</text>`;});
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${ed}${no}
+    <circle cx="${MX}" cy="${my}" r="9" fill="var(--accent)"/><text x="${MX}" y="${(my+3.6).toFixed(1)}" text-anchor="middle" fill="#06231a" font-size="10" font-weight="800">Σ</text>
+    <text x="${MX+16}" y="${(my-3).toFixed(1)}" fill="var(--fg)" font-size="12" font-weight="800">META</text>
+    <text x="${MX+16}" y="${(my+12).toFixed(1)}" fill="var(--muted)" font-size="10">→ decisión GO</text></svg>
+    <div class="faint" style="font-size:11px;margin-top:4px;font-weight:600">grosor = importancia real (permutación) de cada feature en la decisión</div>`;
+})();
+
+(function(){
+  const pts=MD.edge||[],box=$("edge");$("edgetag").textContent=MD.generado?"meta vs retorno real":"";
+  if(!pts.length){box.innerHTML="<div class='muted' style='padding:30px 8px'>Sin datos del modelo.</div>";$("calib").innerHTML="";return;}
+  const W=560,H=220,P={l:44,r:12,t:12,b:28};
+  const xs=pts.map(p=>p.p),ys=pts.map(p=>p.r);
+  let xlo=Math.min(...xs),xhi=Math.max(...xs),ylo=Math.min(...ys),yhi=Math.max(...ys);
+  const yp=(yhi-ylo)*0.1||0.02;ylo-=yp;yhi+=yp;xlo=Math.min(xlo,0.4);xhi=Math.max(xhi,0.6);
+  const x=v=>P.l+(W-P.l-P.r)*((v-xlo)/(xhi-xlo)),y=v=>P.t+(H-P.t-P.b)*(1-(v-ylo)/(yhi-ylo));
+  let g="";for(let k=0;k<=3;k++){const v=ylo+(yhi-ylo)*k/3,yy=y(v).toFixed(1);g+=`<line x1="${P.l}" y1="${yy}" x2="${W-P.r}" y2="${yy}" stroke="var(--line2)"/><text x="${P.l-6}" y="${(+yy+3).toFixed(1)}" text-anchor="end" fill="var(--faint)" font-size="10">${(v>=0?'+':'')+v.toFixed(2)}</text>`;}
+  const y0=y(0).toFixed(1),x5=x(0.5).toFixed(1);
+  const dots=pts.map(p=>`<circle cx="${x(p.p).toFixed(1)}" cy="${y(p.r).toFixed(1)}" r="2.6" fill="${p.ok?'var(--up)':'var(--down)'}" opacity=".62"/>`).join("");
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${g}
+    <line x1="${P.l}" y1="${y0}" x2="${W-P.r}" y2="${y0}" stroke="var(--muted)" stroke-dasharray="3 3" opacity=".5"/>
+    <line x1="${x5}" y1="${P.t}" x2="${x5}" y2="${H-P.b}" stroke="var(--muted)" stroke-dasharray="3 3" opacity=".5"/>
+    ${dots}
+    <text x="${P.l}" y="${H-8}" fill="var(--faint)" font-size="10">conf. meta ${(xlo*100).toFixed(0)}%</text>
+    <text x="${((P.l+W-P.r)/2).toFixed(0)}" y="${H-8}" fill="var(--faint)" font-size="10" text-anchor="middle">confianza del meta →</text>
+    <text x="${W-P.r}" y="${H-8}" fill="var(--faint)" font-size="10" text-anchor="end">${(xhi*100).toFixed(0)}%</text></svg>`;
+  const cal=MD.calibracion||[];
+  $("calib").innerHTML=cal.length?`<div class="faint" style="font-size:11px;margin:8px 0 5px;font-weight:600">Calibración — acierto real por tramo de confianza:</div>
+    <div style="display:flex;gap:4px;align-items:flex-end;height:46px">`+cal.map(c=>`<div style="flex:1;text-align:center"><div style="background:var(--accent);height:${(c.acierto*42).toFixed(0)}px;border-radius:3px 3px 0 0;opacity:.85"></div><div class="faint" style="font-size:9px;margin-top:2px">${(c.p*100).toFixed(0)}%→${(c.acierto*100).toFixed(0)}%</div></div>`).join("")+`</div>`:"";
+})();
 
 $("mkt").innerHTML=(DATA.mercado||[]).map(m=>`<div class="mcell"><div class="n">${m.nombre}</div><div class="p">${n2(m.precio)}</div><div class="c ${cls(m.chg)}">${pct(m.chg)}</div></div>`).join("");
 $("foot").textContent=`Ilegalísimo Terminal · cuenta PAPER (nunca dinero real) · datos Alpaca · Yahoo · Forex Factory · ${DATA.ts} Madrid`;

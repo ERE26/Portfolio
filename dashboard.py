@@ -84,6 +84,15 @@ def _ohlc(ticker, cli, n=70, nombre=None):
         return {}
 
 
+def _modelo():
+    """Cache de inteligencia del modelo (importancias + edge matrix), generado por
+    modelo.py (lento, se regenera a diario). Si no existe, se omite la seccion."""
+    try:
+        return json.load(open("datos/modelo_cache.json"))
+    except Exception:
+        return {}
+
+
 def _watchlist():
     try:
         d = json.load(open("datos/watchlist.json"))
@@ -247,6 +256,7 @@ def reunir():
         "sectores": sectores,
         "top_movers": top_movers,
         "watchlist": _watchlist(),
+        "modelo": _modelo(),
         "calendario": _calendario(cli),
         "mercado": _mercado(cli),
         "noticias": noticias,

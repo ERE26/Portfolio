@@ -13,3 +13,6 @@ plotly>=5.18       # graficos interactivos de la interfaz
 # Modelos de volatilidad formales (patrones/volatilidad.py: GARCH y VaR). OPCIONAL:
 # la ruta de produccion (features del meta) usa EWMA en numpy puro y no lo necesita.
 arch>=6.0          # GARCH(1,1) por maxima verosimilitud + pronostico de vol / VaR
+# Web en vivo (serve.py): sirve el terminal con datos frescos. Ver docs/desplegar_web.md
+fastapi>=0.110
+uvicorn[standard]>=0.29
