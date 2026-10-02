@@ -1224,3 +1224,39 @@ def test_slippage_nan_y_consumo(tmp_path):
     s, d = A.slippage(log, fills)
     assert s["n"] == 2                      # la fila NaN se descarta; 2 fills para 2 entradas
     assert set(d["real"]) == {100.05, 100.20}   # cada fill consumido una sola vez (no reutilizado)
+
+
+def test_presupuesto_prior_suma_uno_y_reserva_intradia():
+    from patrones import presupuesto as P
+    cap, nota = P.objetivo()                       # sin historia viva -> prior de backtest
+    assert "prior" in nota
+    assert abs(sum(cap.values()) - 1.0) < 1e-9     # el capital reparte el 100%
+    assert cap["intradia"] == P.SLEEVE_INTRADIA    # el intradia es un sleeve fijo
+    # los libros largos reparten (1 - sleeve) en proporcion a los pesos de riesgo HRP
+    largos = sum(cap[k] for k in P.LIBROS_LARGOS)
+    assert abs(largos - (1 - P.SLEEVE_INTRADIA)) < 1e-9
+    assert cap["swing"] > cap["tsmom"] > cap["rotacion"]   # orden del prior HRP
+
+
+def test_presupuesto_cae_al_prior_con_poca_historia():
+    from patrones import presupuesto as P
+    viva = {k: np.random.default_rng(0).normal(0, 0.03, 10) for k in P.LIBROS_LARGOS}
+    _, nota = P.objetivo(viva, min_obs=24)         # 10 obs < 24 -> no usa HRP vivo
+    assert "prior" in nota
+
+
+def test_presupuesto_usa_hrp_vivo_con_historia_suficiente():
+    from patrones import presupuesto as P
+    rng = np.random.default_rng(1)
+    viva = {k: rng.normal(0, v, 36) for k, v in
+            zip(P.LIBROS_LARGOS, (0.03, 0.04, 0.05))}
+    cap, nota = P.objetivo(viva, min_obs=24)       # 36 obs/libro -> HRP vivo
+    assert "vivo" in nota
+    assert cap["intradia"] == P.SLEEVE_INTRADIA    # el sleeve sigue fijo
+    assert abs(sum(cap.values()) - 1.0) < 1e-9
+
+
+def test_presupuesto_fail_safe_ante_entrada_corrupta():
+    from patrones import presupuesto as P
+    cap, nota = P.objetivo({"swing": ["x", None], "tsmom": [], "rotacion": None})
+    assert "prior" in nota and abs(sum(cap.values()) - 1.0) < 1e-9   # nunca revienta

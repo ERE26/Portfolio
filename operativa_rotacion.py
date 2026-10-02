@@ -73,9 +73,13 @@ def _marcar_rebal():
     json.dump({"fecha": pd.Timestamp.now().isoformat()}, open(ESTADO, "w"))
 
 
-def ejecutar(enviar=False, capital_frac=0.15, dias_min=25):
+def ejecutar(enviar=False, capital_frac=None, dias_min=25):
     """Rebalanceo MENSUAL del Libro D (auto-limitado: si el ultimo fue hace <dias_min,
-    no toca). capital_frac = fraccion del equity dedicada a este libro."""
+    no toca). capital_frac = fraccion del equity dedicada a este libro; si es None se
+    toma del PRESUPUESTO por libro (HRP cross-book), fuente unica de verdad."""
+    if capital_frac is None:
+        from patrones import presupuesto
+        capital_frac = presupuesto.frac_libro("rotacion")
     ult = _ultima_rebal()
     if ult is not None and (pd.Timestamp.now() - ult).days < dias_min:
         print(f"LIBRO D (rotacion Europa): ultimo rebalanceo hace {(pd.Timestamp.now()-ult).days}d "
