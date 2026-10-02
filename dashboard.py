@@ -66,6 +66,46 @@ def _mercado(cli):
     return filas
 
 
+def _watchlist():
+    try:
+        d = json.load(open("datos/watchlist.json"))
+        return sorted(d.keys()) if isinstance(d, dict) else []
+    except Exception:
+        return []
+
+
+def _calendario(cli, max_ev=8):
+    """Calendario economico de la semana (Forex Factory): eventos de impacto alto/medio
+    en USD y EUR, proximos primero."""
+    try:
+        from fuentes import forexfactory as FF
+        partes = []
+        for w in ("esta_semana", "proxima_semana"):
+            try:
+                partes.append(FF.calendario(w, cliente=cli))
+            except Exception:
+                pass
+        df = pd.concat(partes, ignore_index=True) if partes else None
+    except Exception:
+        return []
+    if df is None or len(df) == 0:
+        return []
+    try:
+        df = df[df["pais"].isin(["USD", "EUR"])]
+        df = df[df["impacto"].astype(str).str.lower().isin(["high", "medium"])]
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce", utc=True)
+        ahora = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=2)
+        df = df[df["fecha"] >= ahora].sort_values("fecha")      # solo PROXIMOS
+        out = []
+        for _, r in df.head(max_ev).iterrows():
+            out.append({"fecha": str(r.get("fecha", ""))[:16], "pais": str(r.get("pais", "")),
+                        "evento": str(r.get("evento", "")), "impacto": str(r.get("impacto", "")),
+                        "prevision": str(r.get("prevision", "")), "anterior": str(r.get("anterior", ""))})
+        return out
+    except Exception:
+        return []
+
+
 def _noticias(tickers, cli, max_total=14):
     from fuentes import noticias_vivo
     vistos, out = set(), []
@@ -115,14 +155,32 @@ def reunir():
     exp_libro = R.exposicion_por_libro(pos, equity, ordenes)
 
     px = AT.precio_actual(list(pos)) if pos else {}
+    try:
+        from fuentes import universo as U
+        cat = U.catalogo()
+    except Exception:
+        cat = {}
     posiciones = []
     for t, p in sorted(pos.items(), key=lambda x: -abs(float(x[1].get("valor", 0)))):
         val = float(p.get("valor", 0.0))
-        posiciones.append({"ticker": t, "qty": float(p.get("qty", 0)), "valor": val,
-                           "pl": float(p.get("pl", 0.0)),
+        pl = float(p.get("pl", 0.0))
+        coste = val - pl
+        posiciones.append({"ticker": t, "qty": float(p.get("qty", 0)), "valor": val, "pl": pl,
+                           "pl_pct": (pl / coste) if coste else 0.0,
                            "peso": val / equity if equity else 0.0,
                            "precio": float(px.get(t, 0.0)),
+                           "sector": cat.get(t, {}).get("sector", "otros"),
                            "libro": libros.get(t, "sin_clasificar")})
+    # asignacion por sector (sobre el valor absoluto)
+    sect = {}
+    for p in posiciones:
+        sect[p["sector"]] = sect.get(p["sector"], 0.0) + abs(p["valor"])
+    tot_s = sum(sect.values()) or 1.0
+    sectores = [{"sector": k, "valor": v, "peso": v / tot_s}
+                for k, v in sorted(sect.items(), key=lambda x: -x[1])]
+    # top movers del dia (por P&L%)
+    movers = sorted([p for p in posiciones if p["valor"]], key=lambda x: -x["pl_pct"])
+    top_movers = movers[:3] + movers[-3:] if len(movers) > 6 else movers
 
     # tear-sheet + SPY normalizado para la curva
     eqs = pd.Series({pd.Timestamp(c["fecha"]): c["equity"] for c in curva}) if curva else pd.Series(dtype=float)
@@ -166,7 +224,11 @@ def reunir():
                    for k, v in sorted(exp_libro.items(), key=lambda x: -x[1]["bruta"])],
         "curva": curva, "spy": spy,
         "tearsheet": met,
-        "ops": {**st, "slippage_bps": slp.get("medio_bps")},
+        "ops": {**st, "slippage_bps": slp.get("mediana_bps", slp.get("medio_bps"))},
+        "sectores": sectores,
+        "top_movers": top_movers,
+        "watchlist": _watchlist(),
+        "calendario": _calendario(cli),
         "mercado": _mercado(cli),
         "noticias": noticias,
     }
