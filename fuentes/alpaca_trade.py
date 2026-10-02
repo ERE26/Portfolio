@@ -9,6 +9,7 @@ simulado. Bloqueado al endpoint paper por seguridad: NUNCA toca dinero real.
 Nunca se suben las claves al repositorio (datos/ esta en .gitignore).
 """
 import os
+import uuid
 
 import requests
 
@@ -77,10 +78,14 @@ def precio_actual(tickers):
     return {k: v["p"] for k, v in r.json().get("trades", {}).items()}
 
 
-def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market"):
+def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market", libro=None):
     """Envia UNA orden a la cuenta paper. Requiere confirmar=True (salvaguarda).
 
     qty: numero de acciones (entero, >0). lado: 'buy' o 'sell'.
+    libro: etiqueta del libro que origina la orden ('intradia'|'swing'|'tsmom'...).
+      Se graba en el client_order_id ('<libro>-<id>'), lo que permite ATRIBUIR cada
+      posicion/operacion a su libro despues (capa de riesgo por libro). No altera la
+      ejecucion; solo anota la autoria.
     Con confirmar=False devuelve la orden que se ENVIARIA, sin enviarla (dry-run).
     """
     qty = int(qty)
@@ -88,6 +93,8 @@ def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market"):
         return {"omitida": True, "ticker": ticker, "qty": qty, "lado": lado}
     cuerpo = {"symbol": ticker, "qty": str(qty), "side": lado,
               "type": tipo, "time_in_force": "day"}
+    if libro:
+        cuerpo["client_order_id"] = f"{libro}-{uuid.uuid4().hex[:16]}"
     if not confirmar:
         return {"dry_run": True, **cuerpo}
     r = requests.post(_url("orders"), json=cuerpo, headers=_headers(), timeout=30)
@@ -95,11 +102,34 @@ def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market"):
     return r.json()
 
 
-def enviar_bracket(ticker, qty, tp_price, sl_price, lado="buy", confirmar=False):
+def historia_cuenta(period="3M", timeframe="1D"):
+    """Serie historica del equity de la cuenta paper (endpoint portfolio/history).
+    Devuelve un DataFrame con indice de fecha y columnas equity y profit_loss_pct.
+    Base del calculo de drawdown y de las metricas de rendimiento."""
+    import pandas as pd
+    r = requests.get(_url("account/portfolio/history"),
+                     params={"period": period, "timeframe": timeframe,
+                             "extended_hours": "false"},
+                     headers=_headers(), timeout=30)
+    r.raise_for_status()
+    d = r.json()
+    ts = d.get("timestamp", [])
+    eq = d.get("equity", [])
+    if not ts or not eq:
+        return pd.DataFrame(columns=["equity", "pl_pct"])
+    idx = pd.to_datetime(pd.Series(ts, dtype="int64"), unit="s")
+    df = pd.DataFrame({"equity": pd.Series(eq, dtype="float64").to_numpy(),
+                       "pl_pct": pd.Series(d.get("profit_loss_pct", [0] * len(eq))).to_numpy()},
+                      index=idx)
+    return df[df["equity"] > 0]
+
+
+def enviar_bracket(ticker, qty, tp_price, sl_price, lado="buy", confirmar=False, libro=None):
     """Orden BRACKET para intradia: entrada a mercado + take-profit (limit) y
     stop-loss (stop). Alpaca gestiona la salida sola cuando se toca TP o SL.
 
     tp_price/sl_price: precios de objetivo y stop. Con confirmar=False es dry-run.
+    libro: etiqueta del libro de origen (-> client_order_id, para atribuir riesgo).
     """
     qty = int(qty)
     if qty <= 0:
@@ -108,6 +138,8 @@ def enviar_bracket(ticker, qty, tp_price, sl_price, lado="buy", confirmar=False)
               "time_in_force": "day", "order_class": "bracket",
               "take_profit": {"limit_price": round(float(tp_price), 2)},
               "stop_loss": {"stop_price": round(float(sl_price), 2)}}
+    if libro:
+        cuerpo["client_order_id"] = f"{libro}-{uuid.uuid4().hex[:16]}"
     if not confirmar:
         return {"dry_run": True, **cuerpo}
     r = requests.post(_url("orders"), json=cuerpo, headers=_headers(), timeout=30)

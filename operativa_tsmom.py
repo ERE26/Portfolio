@@ -123,7 +123,7 @@ def ejecutar(enviar=False, capital_frac=0.20, dias_min=25):
     ok = 0
     for t, l, q, p in plan:
         try:
-            r = AT.enviar_orden(t, q, l, confirmar=True)
+            r = AT.enviar_orden(t, q, l, confirmar=True, libro="tsmom")
             if r.get("id"):
                 ok += 1
         except Exception as e:

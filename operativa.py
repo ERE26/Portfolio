@@ -116,7 +116,7 @@ def ejecutar(enviar=False, reserva_intradia=0.25):
     ok = 0
     for o in plan:
         try:
-            r = AT.enviar_orden(o["ticker"], o["qty"], o["lado"], confirmar=True)
+            r = AT.enviar_orden(o["ticker"], o["qty"], o["lado"], confirmar=True, libro="swing")
             if r.get("id"):
                 ok += 1
         except Exception as e:

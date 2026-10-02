@@ -996,3 +996,60 @@ def test_garch_persistencia_y_var_si_arch():
     p = V.persistencia(res)
     assert 0 < p["persistencia"] < 1.0
     assert V.var_garch(r, 0.95) > 0
+
+
+# ------------------------------------------------- capa de riesgo de cartera (Tier 1)
+def test_exposiciones_bruta_neta_concentracion():
+    from patrones import riesgo as R
+    pos = {"A": {"valor": 5000, "pl": 0}, "B": {"valor": 3000, "pl": 0}, "C": {"valor": -2000, "pl": 0}}
+    e = R.exposiciones(pos, 10000)
+    assert abs(e["bruta"] - 1.0) < 1e-9       # (5000+3000+2000)/10000
+    assert abs(e["neta"] - 0.6) < 1e-9        # (5000+3000-2000)/10000
+    assert abs(e["peso_max"] - 0.5) < 1e-9
+    assert R.exposiciones({}, 10000)["n"] == 0
+    assert R.exposiciones({"A": {"valor": 1}}, 0)["bruta"] == 0.0   # equity 0 no revienta
+
+
+def test_atribuir_libros_solo_prefijos_validos():
+    from patrones import riesgo as R
+    pos = {"AAPL": {"valor": 1}, "TLT": {"valor": 1}, "XYZ": {"valor": 1}}
+    ordenes = [{"symbol": "AAPL", "client_order_id": "intradia-abc123"},
+               {"symbol": "XYZ", "client_order_id": "c11ba5b0-7f3a-11ef-bad"}]  # hash de Alpaca, NO un libro
+    lib = R.atribuir_libros(pos, ordenes)
+    assert lib["AAPL"] == "intradia"          # prefijo valido
+    assert lib["TLT"] == "tsmom"              # reservado
+    assert lib["XYZ"] == "sin_clasificar"    # hash autogenerado NO cuenta como libro
+
+
+def test_evaluar_riesgo_killswitch(tmp_path, monkeypatch):
+    from patrones import riesgo as R
+    monkeypatch.setattr(R, "ESTADO", str(tmp_path / "estado.json"))
+    R.guardar_estado({"fecha_dia": R._hoy(), "equity_inicio_dia": 10000.0, "pico_equity": 11000.0})
+    # perdida diaria -4% (< -3%) -> HALT
+    ev = R.evaluar_riesgo({"equity": 9600.0}, {}, persistir=False)
+    assert ev["decision"] == "HALT"
+    # drawdown desde pico 11000 a 10500 = -4.5% -> REDUCE (umbral 6% no llega), dia +0 -> GO/REDUCE
+    R.guardar_estado({"fecha_dia": R._hoy(), "equity_inicio_dia": 10500.0, "pico_equity": 11000.0})
+    ev2 = R.evaluar_riesgo({"equity": 10500.0}, {}, persistir=False)
+    assert ev2["decision"] == "GO"
+    # todo bien -> GO
+    R.guardar_estado({"fecha_dia": R._hoy(), "equity_inicio_dia": 10000.0, "pico_equity": 10000.0})
+    assert R.evaluar_riesgo({"equity": 10050.0}, {}, persistir=False)["decision"] == "GO"
+
+
+def test_presupuesto_riesgo_fallbacks():
+    from patrones import riesgo as R
+    assert R.presupuesto_riesgo({})[0] == {}
+    w1, _ = R.presupuesto_riesgo({"a": np.random.default_rng(0).normal(0, 0.01, 50)})
+    assert w1 == {"a": 1.0}                    # un solo libro -> 100%
+    rl = {"a": np.random.default_rng(0).normal(0, 0.01, 60),
+          "b": np.random.default_rng(1).normal(0, 0.03, 60)}
+    w2, nota = R.presupuesto_riesgo(rl)
+    assert abs(sum(w2.values()) - 1.0) < 1e-6
+    assert w2["a"] > w2["b"]                    # menos vol -> mas peso de riesgo
+
+
+def test_var_cartera_sin_posiciones():
+    from patrones import riesgo as R
+    v = R.var_cartera({}, 10000)
+    assert np.isnan(v["var_pct"]) and v["n_cubiertos"] == 0

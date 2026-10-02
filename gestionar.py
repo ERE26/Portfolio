@@ -307,6 +307,19 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     RVOL_FUERTE = cargar_umbral(1.5)      # umbral afinado por el aprendizaje (o 1.5 a priori)
     if gestionar and rotar:
         reconciliar()      # marca YA los SL recientes en el log ANTES de mirar el cooldown
+        # GATE DE RIESGO DE CARTERA (Tier 1): kill-switch antes de abrir nada nuevo.
+        # Si el veredicto no es GO (perdida diaria/drawdown/exposicion/concentracion),
+        # NO se abren posiciones nuevas este ciclo -> preservacion de capital.
+        riesgo_ok = True
+        try:
+            from patrones import riesgo as _Rk
+            _ev = _Rk.evaluar_riesgo(AT.cuenta(), pos)
+            if _ev["decision"] != "GO":
+                print(f"\n[RIESGO {_ev['decision']}]: {'; '.join(_ev['razones'][:3])}")
+                print("  -> No se abren posiciones nuevas este ciclo (gestiona las abiertas).")
+                riesgo_ok = False
+        except Exception as e:
+            print(f"[riesgo] no evaluado ({str(e)[:50]}); se continua con prudencia.")
         held = set(pos) - set(a_cerrar)
         # cooldown = (log reconciliado + fills en vivo) U lo que acabamos de cerrar
         # este ciclo. Nunca re-comprar un nombre que acaba de saltar el SL ni el que
@@ -318,7 +331,7 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
         libres = max(N_OBJETIVO - intradia_vivas, 0)
         # CONFLUENCIA: solo pasan los que cumplen VARIAS confirmaciones (no el minimo)
         fuertes = rankear_conviccion(opo, RVOL_FUERTE, excluir=held | cooldown)
-        if libres and len(fuertes):
+        if libres and len(fuertes) and riesgo_ok:
             cfg = CONFIG["15Min"]
             cash = float(AT.cuenta()["cash"])
             por_pos = min(reserva_por_pos, cash / libres) if libres else 0.0
@@ -338,7 +351,7 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                 tp = round(precio * (1 + cfg["k_pt"] * s["atr_pct"]), 2)
                 sl = round(precio * (1 - cfg["k_sl"] * s["atr_pct"]), 2)
                 try:
-                    r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True)
+                    r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True, libro="intradia")
                     if r.get("id"):
                         colocadas += 1
                         sn = float(s.get("sent", 0.0))   # sentimiento ya calculado en el ranking
