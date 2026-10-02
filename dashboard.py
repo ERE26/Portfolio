@@ -66,6 +66,24 @@ def _mercado(cli):
     return filas
 
 
+def _ohlc(ticker, cli, n=70, nombre=None):
+    """Velas diarias (OHLC) de un instrumento para el grafico de velas. Yahoo."""
+    try:
+        from fuentes import yahoo
+        df, _ = yahoo.historico(ticker, intervalo="1d", rango="4mo", cliente=cli)
+        df = df.tail(n)
+        bars = [{"f": d.strftime("%Y-%m-%d"), "o": float(r["open"]), "h": float(r["high"]),
+                 "l": float(r["low"]), "c": float(r["close"])} for d, r in df.iterrows()]
+        if len(bars) < 2:
+            return {}
+        last, prev = bars[-1]["c"], bars[-2]["c"]
+        return {"ticker": ticker, "nombre": nombre or ticker, "bars": bars,
+                "o": bars[-1]["o"], "h": bars[-1]["h"], "l": bars[-1]["l"], "c": last,
+                "chg": last / prev - 1 if prev else 0.0}
+    except Exception:
+        return {}
+
+
 def _watchlist():
     try:
         d = json.load(open("datos/watchlist.json"))
@@ -223,6 +241,7 @@ def reunir():
         "libros": [{"libro": k, "bruta": v["bruta"], "pl": v["pl"], "n": v["n"]}
                    for k, v in sorted(exp_libro.items(), key=lambda x: -x[1]["bruta"])],
         "curva": curva, "spy": spy,
+        "grafico": _ohlc("SPY", cli, 70, "S&P 500 (SPY)"),
         "tearsheet": met,
         "ops": {**st, "slippage_bps": slp.get("mediana_bps", slp.get("medio_bps"))},
         "sectores": sectores,
