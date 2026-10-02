@@ -947,3 +947,52 @@ def test_tsmom_objetivo_long_flat():
     assert "SPY" in obj and "GLD" in obj
     assert "TLT" not in obj                    # señal negativa -> efectivo
     assert abs(sum(obj.values()) - 10000.0) < 1.0   # normalizado al capital
+
+
+# ------------------------------------------------- volatilidad condicional (GARCH/EWMA)
+def test_vol_ewma_positiva_y_sin_lookahead():
+    """La vol EWMA es positiva y la vol en t NO depende del retorno en t (sin
+    look-ahead): cambiar el ULTIMO retorno no altera la vol salvo en la ultima barra."""
+    from patrones import volatilidad as V
+    rng = np.random.default_rng(0)
+    r = pd.Series(rng.normal(0, 0.01, 300))
+    v1 = V.vol_ewma(r)
+    r2 = r.copy(); r2.iloc[-1] += 0.10          # cambia solo el retorno final
+    v2 = V.vol_ewma(r2)
+    assert (v1 > 0).all()
+    # la vol hasta la penultima barra es identica (no mira el futuro)
+    assert np.allclose(v1.iloc[:-1].to_numpy(), v2.iloc[:-1].to_numpy())
+
+
+def test_rasgos_vol_condicional_columnas():
+    from patrones import volatilidad as V
+    c = pd.Series(100 * np.cumprod(1 + np.random.default_rng(1).normal(0, 0.01, 250)))
+    d = V.rasgos_vol_condicional(c)
+    assert list(d.columns) == ["vol_cond", "vol_ratio", "vol_subiendo", "ret_estandarizado"]
+    assert len(d) == len(c)
+    assert (d["vol_cond"].dropna() > 0).all()
+
+
+def test_var_historico_sensato():
+    from patrones import volatilidad as V
+    r = pd.Series(np.random.default_rng(2).normal(0, 0.02, 1000))
+    var = V.var_historico(r, nivel=0.95)
+    assert 0.02 < var < 0.06                     # ~1.645*0.02 ≈ 0.033
+
+
+def test_garch_persistencia_y_var_si_arch():
+    """GARCH(1,1) formal: alpha+beta en (0,1) y VaR positivo. Omitido si falta `arch`."""
+    pytest.importorskip("arch")
+    from patrones import volatilidad as V
+    rng = np.random.default_rng(3)
+    # serie con clustering de vol para que GARCH tenga algo que estimar
+    r = []
+    s = 0.01
+    for _ in range(1500):
+        s = np.sqrt(1e-6 + 0.1 * (r[-1] ** 2 if r else 1e-4) + 0.85 * s ** 2)
+        r.append(rng.normal(0, s))
+    r = pd.Series(r)
+    res = V.garch_ajustar(r)
+    p = V.persistencia(res)
+    assert 0 < p["persistencia"] < 1.0
+    assert V.var_garch(r, 0.95) > 0
