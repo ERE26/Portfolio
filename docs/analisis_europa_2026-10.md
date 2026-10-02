@@ -92,11 +92,15 @@ Mismo perfil que el TSMOM: Sharpe modesto en solitario, valor en la descorrelaci
 (EWN, +14,0%). Coherente con la tabla maestra (IBEX y AEX son los líderes; CAC
 excluido por BAJISTA). La lógica se sostiene sola.
 
-**Honestidad:** Sharpe 0,49 es modesto y el backtest es un solo camino. Antes de
-montarlo como libro en vivo hay que pasarlo por **DSR/PBO y walk-forward purgado**
-(como hicimos con el TSMOM) para descartar sobreajuste. Queda como **candidato a
-Libro D**, no cableado todavía. Pero el motor (momentum transversal) ya existe en
-`patrones/transversal.py`, así que el coste de montarlo es bajo.
+**Validación DSR/PBO (reproducible en `validar_libroD.py`, 36 configs, 188 meses) —
+honesta:** la config pre-especificada (top-3, momentum 6M saltando 1M, filtro SMA200)
+da Sharpe 0,53. **PBO 0,24** (NO sobreajustado) y **DSR vs azar 0,94** → el método es
+limpio. PERO el **DSR contra comprar-y-mantener Europa (VGK) es 0,89**, por debajo del
+0,95 estándar: su *edge* sobre la beta europea es **marginal**. Veredicto (con
+verificación adversarial): **CANDIDATO EN OBSERVACIÓN**, no alfa validada. Se puede
+operar en **paper** (riesgo cero, para generar evidencia OOS y medir el slippage real
+de los ETFs finos), pero **nunca dinero real** hasta DSR-vs-VGK ≥ 0,95 + slippage
+medido + track OOS. Módulo: `operativa_rotacion.py` (auto-limitado, gate de riesgo).
 
 ## 5. Nota de método
 

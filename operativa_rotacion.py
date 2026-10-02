@@ -1,9 +1,13 @@
 """Libro D: ROTACION POR PAISES EUROPEOS (momentum transversal entre ETFs de pais que
-Alpaca SI puede operar). Flujo descorrelacionado de los libros US (corr 0.56 con SPY).
+Alpaca SI puede operar). Flujo poco correlacionado con los libros US (corr 0.56 con SPY).
 
-Validado (2010-2026, 36 configs): DSR 0.94, PBO 0.24 (NO sobreajustado), Sharpe 0.53,
-maxDD -30%. Su valor es la DIVERSIFICACION, no el Sharpe heroico. Ver
-docs/analisis_europa_2026-10.md y la validacion DSR/PBO.
+ESTADO: CANDIDATO EN OBSERVACION (no 'validado'). Validacion reproducible en
+`validar_libroD.py` (2010-2026, 36 configs, 188 meses): PBO 0.24 (NO sobreajustado) y
+DSR vs azar 0.94 -> el metodo es limpio. PERO el DSR contra comprar-y-mantener Europa
+(VGK) es 0.89, por debajo del 0.95 estandar: el EDGE sobre la beta europea es MARGINAL.
+Es un diversificador modesto, no alfa heroica. NUNCA dinero real hasta: DSR-vs-VGK>=0.95,
+slippage real medido (ETFs finos EWO/EWK/EWD), y track OOS en paper. Aqui solo PAPER,
+para GENERAR esa evidencia OOS a riesgo cero.
 
 Cada mes: largo el TOP-K por momentum a 6 meses (saltando el ultimo mes), SOLO si el
 ETF esta sobre su SMA200; a efectivo lo que no tenga tendencia. Rebalanceo MENSUAL,
