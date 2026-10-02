@@ -25,3 +25,4 @@ datos/riesgo_libros.csv
 web/dashboard.html
 datos/dashboard.json
 datos/modelo_cache.json
+datos/radar_last.json
