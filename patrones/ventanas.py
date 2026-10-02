@@ -284,6 +284,16 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
         atr_pct = F["atr_pct"].to_numpy(float)[pos]
         atr_pct = np.where(np.isfinite(atr_pct) & (atr_pct > 1e-5), atr_pct, np.nan)
 
+        # rasgos de volatilidad CONDICIONAL (EWMA/RiskMetrics, familia GARCH; sin
+        # look-ahead). Capturan el REGIMEN de riesgo del momento para el meta-modelo:
+        # un setup en vol alta/subiendo tiene una fiabilidad distinta que en calma.
+        from .volatilidad import rasgos_vol_condicional
+        _rvc = rasgos_vol_condicional(df["close"])
+        vol_cond = _rvc["vol_cond"].to_numpy(float)[pos]
+        vol_ratio = _rvc["vol_ratio"].to_numpy(float)[pos]
+        vol_subiendo = _rvc["vol_subiendo"].to_numpy(float)[pos]
+        ret_estand = _rvc["ret_estandarizado"].to_numpy(float)[pos]
+
         Wfc = ventanas_de(lc, H)         # camino futuro: barras t+1 .. t+H
         Wfh = ventanas_de(lh, H)
         Wfl = ventanas_de(ll, H)
@@ -328,6 +338,8 @@ def construir(precios, ctx=None, fuente_noticias=None, cfg=None, tickers=None, v
             "sector": ctx.sector_de(t) if ctx is not None else "desconocido",
             "close": df["close"].to_numpy(float)[pos][valido],
             "atr_pct": atr_pct[valido],
+            "vol_cond": vol_cond[valido], "vol_ratio": vol_ratio[valido],
+            "vol_subiendo": vol_subiendo[valido], "ret_estand": ret_estand[valido],
             "barras_hasta_cierre": bhc[valido], "rvol": rv[valido]}))
         acum["y"].append(pd.DataFrame({
             "ret": ret[valido], "direccion": np.sign(ret[valido]),

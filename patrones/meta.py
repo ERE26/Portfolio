@@ -59,7 +59,7 @@ def features_meta(pred, banco=None, i=None):
         f["frac_grupos_acuerdo"] = 0.5
     # regimen y figura del tramo consultado
     if banco is not None and i is not None:
-        for c in ("atr_pct",):
+        for c in ("atr_pct", "vol_cond", "vol_ratio", "vol_subiendo", "ret_estand"):
             if c in banco.meta.columns:
                 f[c] = float(banco.meta[c].iloc[i])
         d = describir(banco.formas[i], banco.formas_vol[i])
