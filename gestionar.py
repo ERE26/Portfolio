@@ -308,18 +308,21 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     if gestionar and rotar:
         reconciliar()      # marca YA los SL recientes en el log ANTES de mirar el cooldown
         # GATE DE RIESGO DE CARTERA (Tier 1): kill-switch antes de abrir nada nuevo.
-        # Si el veredicto no es GO (perdida diaria/drawdown/exposicion/concentracion),
-        # NO se abren posiciones nuevas este ciclo -> preservacion de capital.
-        riesgo_ok = True
-        try:
-            from patrones import riesgo as _Rk
-            _ev = _Rk.evaluar_riesgo(AT.cuenta(), pos)
-            if _ev["decision"] != "GO":
-                print(f"\n[RIESGO {_ev['decision']}]: {'; '.join(_ev['razones'][:3])}")
-                print("  -> No se abren posiciones nuevas este ciclo (gestiona las abiertas).")
-                riesgo_ok = False
-        except Exception as e:
-            print(f"[riesgo] no evaluado ({str(e)[:50]}); se continua con prudencia.")
+        # FALLA CERRADO: gate_abrir devuelve abrir=False ante cualquier error (red,
+        # estado, calculo), nunca sigue abriendo a ciegas. En HALT, ademas, aplana el
+        # intradia (el libro de mas riesgo) -> preservacion de capital, no solo frenar.
+        from patrones import riesgo as _Rk
+        _g = _Rk.gate_abrir(posiciones=pos)   # gate_abrir pide cuenta() dentro de su try (fail-closed)
+        riesgo_ok = _g["abrir"]
+        if not riesgo_ok:
+            print(f"\n[RIESGO {_g['decision']}]: {'; '.join(_g['razones'][:3])}")
+            print("  -> No se abren posiciones nuevas este ciclo.")
+            if _g["decision"] == "HALT":
+                print("  -> HALT: aplanando intradia (preservacion de capital)...")
+                try:
+                    print("    ", AT.cerrar_intradia(confirmar=True))
+                except Exception as e:
+                    print(f"    error al aplanar: {str(e)[:70]}")
         held = set(pos) - set(a_cerrar)
         # cooldown = (log reconciliado + fills en vivo) U lo que acabamos de cerrar
         # este ciclo. Nunca re-comprar un nombre que acaba de saltar el SL ni el que

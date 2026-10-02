@@ -112,6 +112,14 @@ def ejecutar(enviar=False, reserva_intradia=0.25):
     if not enviar:
         print("\n[DRY-RUN] No se ha enviado nada. Ejecuta con --enviar para colocar las ordenes.")
         return
+    # GATE DE RIESGO (Tier 1, fail-closed): si no es GO, no se COMPRA; las ventas
+    # (reduccion de exposicion) siempre se permiten.
+    from patrones import riesgo as _Rk
+    _g = _Rk.gate_abrir()
+    if not _g["abrir"]:
+        n_buys = sum(1 for o in plan if o["lado"] == "buy")
+        print(f"\n[RIESGO {_g['decision']}]: {'; '.join(_g['razones'][:2])} -> se omiten {n_buys} compras (solo ventas).")
+        plan = [o for o in plan if o["lado"] == "sell"]
     print("\nEnviando ordenes a la cuenta PAPER...")
     ok = 0
     for o in plan:

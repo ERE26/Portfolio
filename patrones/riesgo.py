@@ -11,6 +11,15 @@ Tres cosas, en el espiritu de los multi-manager (Millennium/Citadel):
 Solo lee la cuenta paper y precios (Yahoo). No envia ordenes: devuelve decisiones y
 metricas; el que opera (gestionar.py) consulta y actua. El estado (pico de equity,
 equity de inicio de dia) persiste en datos/riesgo_estado.json.
+
+Limitaciones conocidas (v1), honestas, pendientes de refinar:
+  - El presupuesto de riesgo por libro usa la vol de la sub-cartera con el equity
+    TOTAL (proxy razonable, algo auto-referencial); migrara a HRP sobre el historico
+    REAL de retornos por libro cuando se acumule (hoy el snapshot guarda bruta/pl).
+  - corr_media (diversificacion) es una media simple, ciega al signo largo/corto y a
+    los pesos; es un indicador, no una medida exacta de riesgo conjunto.
+  - var_cartera excluye posiciones sin historico suficiente en Yahoo; el informe lo
+    avisa y trata el VaR como cota inferior cuando la cobertura es parcial.
 """
 import json
 import os
@@ -43,6 +52,8 @@ LIMITES = {
                                     # exposicion/concentracion/VaR, no el conteo)
     "exposicion_bruta_max": 1.5,    # suma |valor|/equity (apalancamiento efectivo)
     "concentracion_max": 0.25,      # peso maximo de UNA posicion
+    "var_reduce": 0.03,             # VaR 1d > 3% del equity -> REDUCE (riesgo de cartera)
+    "var_max": 0.05,                # VaR 1d > 5% -> HALT
 }
 
 
@@ -101,11 +112,15 @@ def covarianza_cartera(tickers, lookback_dias=252, condicional=True):
     cov = pd.DataFrame(cov, index=R.columns, columns=R.columns)
     if condicional:
         from .volatilidad import vol_ewma
-        # vol condicional diaria por activo (ultimo valor), reescala la covarianza
-        sd_m = R.std()
+        # Reescala la covarianza para que la DIAGONAL quede en la vol CONDICIONAL
+        # (EWMA) manteniendo la correlacion del estimador shrunk. Se divide por la vol
+        # IMPLICITA de la matriz shrunk (sqrt de su diagonal), NO por R.std(): tras el
+        # shrinkage la diagonal ya no es la varianza muestral, asi que usar R.std()
+        # dejaba la diagonal descuadrada (hallazgo de revision).
+        sd_shrunk = pd.Series(np.sqrt(np.clip(np.diag(cov.to_numpy()), 1e-18, None)), index=cov.index)
         sd_c = pd.Series({t: float(vol_ewma(R[t], anualizar=False).iloc[-1]) for t in R.columns})
-        esc = (sd_c / sd_m.replace(0, np.nan)).reindex(cov.index).fillna(1.0)
-        cov = cov.mul(esc, axis=0).mul(esc, axis=1)  # D C D con D = vol_cond/vol_muestral
+        esc = (sd_c.reindex(cov.index) / sd_shrunk).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+        cov = cov.mul(esc, axis=0).mul(esc, axis=1)  # diag -> sd_c^2, correlacion intacta
     return cov, R
 
 
@@ -203,12 +218,19 @@ def presupuesto_riesgo(retornos_libros, metodo="inv_vol", min_obs=40):
 
 # --------------------------------------------------------------- kill-switches / estado
 def _hoy():
-    return pd.Timestamp.now().strftime("%Y-%m-%d")
+    """Dia de SESION de mercado (America/New_York), no la fecha UTC del servidor:
+    el ancla de P&L diario debe reiniciarse con la sesion US, no a medianoche UTC
+    (que cae en mitad de la tarde de Madrid, con el mercado abierto)."""
+    try:
+        return pd.Timestamp.now(tz="America/New_York").strftime("%Y-%m-%d")
+    except Exception:
+        return pd.Timestamp.utcnow().strftime("%Y-%m-%d")
 
 
 def cargar_estado():
     try:
-        return json.load(open(ESTADO))
+        est = json.load(open(ESTADO))
+        return est if isinstance(est, dict) else {}   # un JSON valido no-dict ('[]') -> {}
     except Exception:
         return {}
 
@@ -218,17 +240,26 @@ def guardar_estado(est):
     json.dump(est, open(ESTADO, "w"), indent=2)
 
 
-def evaluar_riesgo(cuenta, posiciones, ordenes=None, limites=None, persistir=True):
+def evaluar_riesgo(cuenta, posiciones, ordenes=None, limites=None, persistir=True, var_pct=None):
     """Evalua los kill-switches y devuelve la DECISION de riesgo.
 
     Devuelve {decision: 'GO'|'REDUCE'|'HALT', razones: [...], metricas: {...}}.
       - GO: operar normal.
       - REDUCE: no abrir nuevas posiciones; gestionar/cerrar las abiertas.
       - HALT: parar el libro; preservar capital (el que opera decide si aplanar).
+    var_pct: VaR 1 dia de la cartera (fraccion del equity) ya calculado; si se pasa,
+    se aplica un limite de VaR (gobierna el riesgo del CONJUNTO, no solo limites por
+    nombre). El informe lo calcula y lo pasa; el bucle rapido lo omite.
     Mantiene el pico de equity y el equity de inicio de dia en disco (drawdown y P&L
     diario). 'cuenta' es el dict de alpaca_trade.cuenta()."""
     lim = {**LIMITES, **(limites or {})}
     equity = float(cuenta.get("equity", 0.0))
+    # guarda dura: cuenta aniquilada o sin equity valido -> HALT (nunca abrir a ciegas)
+    if not np.isfinite(equity) or equity <= 0:
+        return {"decision": "HALT", "razones": [f"equity no valido o <=0 ({equity})"],
+                "metricas": {"equity": equity, "pl_dia": 0.0, "drawdown": 0.0,
+                             "pico_equity": 0.0, "exposicion_bruta": 0.0,
+                             "n_posiciones": len(posiciones or {}), "concentracion_max": 0.0}}
     est = cargar_estado()
     hoy = _hoy()
     # reinicio diario del ancla de P&L del dia
@@ -267,6 +298,11 @@ def evaluar_riesgo(cuenta, posiciones, ordenes=None, limites=None, persistir=Tru
         sube("REDUCE", f"exposicion bruta {exp['bruta']:.2f}x > {lim['exposicion_bruta_max']}x")
     if exp["peso_max"] > lim["concentracion_max"]:
         sube("REDUCE", f"concentracion {exp['peso_max']:.1%} > {lim['concentracion_max']:.0%} en una posicion")
+    if var_pct is not None and np.isfinite(var_pct):
+        if var_pct > lim.get("var_max", 0.05):
+            sube("HALT", f"VaR 1d {var_pct:.2%} > {lim.get('var_max',0.05):.0%} (riesgo de cartera)")
+        elif var_pct > lim.get("var_reduce", 0.03):
+            sube("REDUCE", f"VaR 1d {var_pct:.2%} (umbral REDUCE)")
 
     est["ultima_decision"] = decision
     if persistir:
@@ -275,3 +311,22 @@ def evaluar_riesgo(cuenta, posiciones, ordenes=None, limites=None, persistir=Tru
             "metricas": {"equity": equity, "pl_dia": pl_dia, "drawdown": dd,
                          "pico_equity": pico, "exposicion_bruta": exp["bruta"],
                          "n_posiciones": exp["n"], "concentracion_max": exp["peso_max"]}}
+
+
+def gate_abrir(cuenta=None, posiciones=None, limites=None):
+    """Puerta de riesgo UNICA para todos los libros: ¿se permite ABRIR posiciones
+    nuevas ahora? FALLA CERRADO: ante CUALQUIER error (red, estado, calculo) devuelve
+    abrir=False. Un kill-switch de preservacion de capital nunca debe fallar abierto.
+
+    Devuelve {abrir: bool, decision, razones}. Cada libro lo llama antes de comprar;
+    las SALIDAS/ventas no se bloquean (se gestiona lo abierto aunque el gate cierre)."""
+    try:
+        from fuentes import alpaca_trade as AT
+        cta = cuenta if cuenta is not None else AT.cuenta()
+        pos = posiciones if posiciones is not None else AT.posiciones()
+        ev = evaluar_riesgo(cta, pos, limites=limites)
+        return {"abrir": ev["decision"] == "GO", "decision": ev["decision"],
+                "razones": ev["razones"]}
+    except Exception as e:
+        return {"abrir": False, "decision": "HALT",
+                "razones": [f"fail-closed: error evaluando riesgo ({str(e)[:70]})"]}

@@ -120,6 +120,14 @@ def ejecutar(enviar=False, capital_frac=0.20, dias_min=25):
     if not enviar:
         print("[DRY-RUN] No se envia nada. Usa --enviar para rebalancear el Libro C.")
         return
+    # GATE DE RIESGO (Tier 1, fail-closed): si no es GO, no se COMPRA; las ventas
+    # (el libro rota hacia efectivo/defensivos) siempre se permiten.
+    from patrones import riesgo as _Rk
+    _g = _Rk.gate_abrir()
+    if not _g["abrir"]:
+        n_buys = sum(1 for _, l, _, _ in plan if l == "buy")
+        print(f"[RIESGO {_g['decision']}]: {'; '.join(_g['razones'][:2])} -> se omiten {n_buys} compras (solo ventas).")
+        plan = [x for x in plan if x[1] == "sell"]
     ok = 0
     for t, l, q, p in plan:
         try:

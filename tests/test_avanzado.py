@@ -1053,3 +1053,45 @@ def test_var_cartera_sin_posiciones():
     from patrones import riesgo as R
     v = R.var_cartera({}, 10000)
     assert np.isnan(v["var_pct"]) and v["n_cubiertos"] == 0
+
+
+def test_gate_abrir_falla_cerrado(monkeypatch):
+    """El gate DEBE fallar CERRADO: si evaluar la cuenta lanza, abrir=False (nunca
+    seguir abriendo a ciegas)."""
+    from patrones import riesgo as R
+    from fuentes import alpaca_trade as AT
+    def boom():
+        raise RuntimeError("red caida")
+    monkeypatch.setattr(AT, "cuenta", boom)
+    monkeypatch.setattr(AT, "posiciones", boom)
+    g = R.gate_abrir()
+    assert g["abrir"] is False and g["decision"] == "HALT"
+
+
+def test_cargar_estado_no_dict_no_rompe(tmp_path, monkeypatch):
+    from patrones import riesgo as R
+    p = tmp_path / "estado.json"
+    p.write_text("[]")                         # JSON valido pero NO dict
+    monkeypatch.setattr(R, "ESTADO", str(p))
+    assert R.cargar_estado() == {}             # no revienta, degrada a {}
+    ev = R.evaluar_riesgo({"equity": 100000.0}, {}, persistir=False)
+    assert ev["decision"] in ("GO", "REDUCE", "HALT")   # no lanza AttributeError
+
+
+def test_evaluar_riesgo_equity_cero_halt():
+    from patrones import riesgo as R
+    assert R.evaluar_riesgo({"equity": 0.0}, {}, persistir=False)["decision"] == "HALT"
+    assert R.evaluar_riesgo({"equity": -500.0}, {}, persistir=False)["decision"] == "HALT"
+    assert R.evaluar_riesgo({}, {}, persistir=False)["decision"] == "HALT"   # sin clave equity
+
+
+def test_evaluar_riesgo_limite_var(tmp_path, monkeypatch):
+    from patrones import riesgo as R
+    monkeypatch.setattr(R, "ESTADO", str(tmp_path / "e.json"))
+    R.guardar_estado({"fecha_dia": R._hoy(), "equity_inicio_dia": 10000.0, "pico_equity": 10000.0})
+    # VaR 6% > var_max 5% -> HALT
+    assert R.evaluar_riesgo({"equity": 10000.0}, {}, persistir=False, var_pct=0.06)["decision"] == "HALT"
+    # VaR 4% entre reduce(3%) y max(5%) -> REDUCE
+    assert R.evaluar_riesgo({"equity": 10000.0}, {}, persistir=False, var_pct=0.04)["decision"] == "REDUCE"
+    # VaR 1% -> GO
+    assert R.evaluar_riesgo({"equity": 10000.0}, {}, persistir=False, var_pct=0.01)["decision"] == "GO"

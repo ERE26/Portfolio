@@ -66,22 +66,41 @@ def main(enforce=False):
     equity = float(cta.get("equity", 0.0))
     cash = float(cta.get("cash", 0.0))
 
-    # 1) cuenta y P&L
-    ev = R.evaluar_riesgo(cta, pos, ordenes)
-    m = ev["metricas"]
-    print(f"\nEquity ${equity:,.0f} | efectivo ${cash:,.0f} | "
-          f"P&L dia {m['pl_dia']:+.2%} | drawdown {m['drawdown']:+.2%} (pico ${m['pico_equity']:,.0f})")
+    # Reconciliar el PICO de equity con el high-water mark REAL (serie historica de la
+    # cuenta), no solo los equity muestreados por el bucle. Asi el drawdown no se
+    # subestima por picos que ocurrieron entre corridas o antes del arranque.
+    try:
+        h = AT.historia_cuenta(period="1A", timeframe="1D")
+        if len(h):
+            hwm = float(h["equity"].max())
+            est = R.cargar_estado()
+            if hwm > float(est.get("pico_equity", 0.0) or 0.0):
+                est["pico_equity"] = hwm
+                R.guardar_estado(est)
+    except Exception:
+        pass
 
-    # 2) exposicion y concentracion
+    # 1) exposicion y concentracion
     exp = R.exposiciones(pos, equity)
-    print(f"\nEXPOSICION: bruta {exp['bruta']:.2f}x | neta {exp['neta']:+.2f}x | "
-          f"{exp['n']} posiciones | mayor {exp['peso_max']:.1%} | top5 {exp['top5']:.1%} | HHI {exp['hhi']:.3f}")
 
-    # 3) VaR de cartera (basado en posiciones, vol condicional EWMA)
+    # 2) VaR de cartera (basado en posiciones, vol condicional EWMA)
+    var_pct = None
     if pos:
         v95 = R.var_cartera(pos, equity, nivel=0.95)
         v99 = R.var_cartera(pos, equity, nivel=0.99)
-        print(f"\nVaR 1 dia (parametrico, {v95['n_cubiertos']}/{len(pos)} cubiertos):")
+        var_pct = v95["var_pct"] if np.isfinite(v95["var_pct"]) else None
+
+    # 3) veredicto: kill-switch con el VaR incluido (gobierna el riesgo del CONJUNTO)
+    ev = R.evaluar_riesgo(cta, pos, ordenes, var_pct=var_pct)
+    m = ev["metricas"]
+    print(f"\nEquity ${equity:,.0f} | efectivo ${cash:,.0f} | "
+          f"P&L dia {m['pl_dia']:+.2%} | drawdown {m['drawdown']:+.2%} (pico ${m['pico_equity']:,.0f})")
+    print(f"\nEXPOSICION: bruta {exp['bruta']:.2f}x | neta {exp['neta']:+.2f}x | "
+          f"{exp['n']} posiciones | mayor {exp['peso_max']:.1%} | top5 {exp['top5']:.1%} | HHI {exp['hhi']:.3f}")
+    if pos:
+        cob = f"{v95['n_cubiertos']}/{len(pos)}"
+        aviso = "" if v95["n_cubiertos"] >= len(pos) else "  (cobertura parcial: VaR es cota INFERIOR)"
+        print(f"\nVaR 1 dia (parametrico, {cob} cubiertos){aviso}:")
         print(f"  95%: {v95['var_pct']:.2%}  (${v95['var_usd']:,.0f})   "
               f"99%: {v99['var_pct']:.2%}  (${v99['var_usd']:,.0f})")
         print(f"  vol diaria cartera {v95['vol_diaria']:.2%} | correlacion media holdings "
