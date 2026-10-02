@@ -271,7 +271,13 @@ def evaluar_riesgo(cuenta, posiciones, ordenes=None, limites=None, persistir=Tru
 
     ini = est["equity_inicio_dia"] or equity
     pico = est["pico_equity"] or equity
-    pl_dia = (equity / ini - 1.0) if ini > 0 else 0.0
+    # P&L del dia contra el CIERRE OFICIAL de ayer (last_equity de Alpaca), que es el
+    # denominador estandar de 'cambio del dia'; si no esta, se usa el ancla propia. Con
+    # el mercado cerrado y sin operar, un valor != 0 es solo mark-to-market de las
+    # posiciones overnight (revalorizacion), no una operacion.
+    last_eq = float(cuenta.get("last_equity", 0) or 0)
+    ref_dia = last_eq if last_eq > 0 else (ini if ini > 0 else equity)
+    pl_dia = (equity / ref_dia - 1.0) if ref_dia > 0 else 0.0
     dd = (equity / pico - 1.0) if pico > 0 else 0.0
     exp = exposiciones(posiciones, equity)
 
