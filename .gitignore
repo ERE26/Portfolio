@@ -19,3 +19,7 @@ datos/snapshots/
 datos/tsmom_rebal.json
 datos/riesgo_estado.json
 datos/riesgo_libros.csv
+
+# dashboard generado (se regenera cada ciclo)
+web/dashboard.html
+datos/dashboard.json
