@@ -139,9 +139,15 @@ def señal(ticker, intervalo="15Min"):
     y = np.log(c.iloc[-5:].to_numpy()); x = np.arange(len(y))
     pend = float(np.polyfit(x, y, 1)[0]) if len(y) >= 3 else 0.0
     bajo_vwap = float((dv.iloc[-4:] < 0).mean())      # fraccion de las ultimas 4 bajo VWAP
+    # MOMENTUM RECIENTE (ultima ~1h): retorno de las ultimas 4 velas de 15m, NO desde la
+    # apertura. Clave para no comprar un valor que ABRIO ALTO por una noticia (volumen y
+    # ret_sesion inflados) pero AHORA cae: su momentum reciente es negativo -> se rechaza.
+    k = min(4, len(c) - 1)
+    ret_reciente = float(c.iloc[-1] / c.iloc[-1 - k] - 1.0) if k >= 1 else 0.0
     return {"precio": precio, "dist_vwap": float(dv.iloc[-1]),
             "rvol": float(rvol(df).iloc[-1]), "ret_sesion": float(r["intra_ret_sesion"].iloc[-1]),
-            "atr_pct": atr / precio if precio else 0.0, "pend": pend, "bajo_vwap": bajo_vwap}
+            "atr_pct": atr / precio if precio else 0.0, "pend": pend, "bajo_vwap": bajo_vwap,
+            "ret_reciente": ret_reciente}
 
 
 # TIME-STOP intradia: un setup intradia tiene VIDA UTIL CORTA. Mantener una
@@ -261,7 +267,10 @@ def escanear(intervalo="15Min", excluir=(), n=12):
             s = señal(t, intervalo)
         except Exception:
             continue
-        cand = (s["dist_vwap"] > 0) and (s["ret_sesion"] > 0) and (s["rvol"] >= cfg["rvol_min"])
+        # CONFLUENCIA de escaneo + MOMENTUM RECIENTE > 0 (no desde la apertura): descarta
+        # el gap-and-fade (abrió alto por noticia y ahora cae), que es puro sesgo de apertura.
+        cand = ((s["dist_vwap"] > 0) and (s["ret_sesion"] > 0) and (s["rvol"] >= cfg["rvol_min"])
+                and (s.get("ret_reciente", 0.0) > 0))
         if cand:
             s["fuerza_rel"] = s["ret_sesion"] - mkt                        # ¿bate al mercado?
             s["ext"] = s["dist_vwap"] / s["atr_pct"] if s["atr_pct"] > 0 else 0.0  # ATRs sobre VWAP
