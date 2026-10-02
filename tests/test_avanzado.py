@@ -1095,3 +1095,54 @@ def test_evaluar_riesgo_limite_var(tmp_path, monkeypatch):
     assert R.evaluar_riesgo({"equity": 10000.0}, {}, persistir=False, var_pct=0.04)["decision"] == "REDUCE"
     # VaR 1% -> GO
     assert R.evaluar_riesgo({"equity": 10000.0}, {}, persistir=False, var_pct=0.01)["decision"] == "GO"
+
+
+# ------------------------------------------------- analitica Tier 2 (tear-sheet, slippage)
+def test_metricas_rendimiento_coherentes():
+    from patrones import analitica as A
+    idx = pd.date_range("2025-01-01", periods=260, freq="B")
+    # tendencia alcista suave con algo de ruido -> Sharpe positivo, maxDD negativo
+    r = np.full(259, 0.0005) + np.random.default_rng(0).normal(0, 0.005, 259)
+    eq = pd.Series(np.concatenate([[100.0], 100 * np.cumprod(1 + r)]), index=idx)
+    m = A.metricas(eq)
+    assert m["sharpe"] > 0 and m["max_drawdown"] <= 0 and 0 <= m["hit_rate"] <= 1
+    assert A.metricas(pd.Series([100.0, 101.0]))["insuficiente"]   # <3 puntos
+
+
+def test_vs_benchmark_identico():
+    from patrones import analitica as A
+    idx = pd.date_range("2025-01-01", periods=120, freq="B")
+    eq = pd.Series(100 * np.cumprod(1 + np.random.default_rng(1).normal(0.0004, 0.01, 120)), index=idx)
+    vb = A.vs_benchmark(eq, eq)                 # contra si misma: beta=1, corr=1
+    assert abs(vb["beta"] - 1.0) < 1e-6 and abs(vb["correlacion"] - 1.0) < 1e-6
+
+
+def test_slippage_signo_y_magnitud():
+    from patrones import analitica as A
+    log = pd.DataFrame([{"ticker": "AAPL", "ts": "2026-10-02T14:00:00Z", "entrada": 100.0},
+                        {"ticker": "MSFT", "ts": "2026-10-02T14:05:00Z", "entrada": 200.0}])
+    fills = [{"symbol": "AAPL", "side": "buy", "price": "100.05", "transaction_time": "2026-10-02T14:00:10Z"},
+             {"symbol": "MSFT", "side": "buy", "price": "199.90", "transaction_time": "2026-10-02T14:05:30Z"}]
+    s, d = A.slippage(log, fills)
+    assert s["n"] == 2
+    ap = d[d["ticker"] == "AAPL"]["slippage_bps"].iloc[0]
+    assert abs(ap - 5.0) < 1e-6                 # pago 100.05 vs 100 -> +5 bps (coste)
+    # un fill demasiado lejano en tiempo NO se empareja
+    fills_lejos = [{"symbol": "AAPL", "side": "buy", "price": "100.05", "transaction_time": "2026-10-02T18:00:00Z"}]
+    assert A.slippage(log.head(1), fills_lejos)[0]["n"] == 0
+
+
+def test_stats_trades_hitrate_pf():
+    from patrones import analitica as A
+    tl = pd.DataFrame([{"pnl": 50}, {"pnl": -20}, {"pnl": 30}, {"pnl": ""}, {"pnl": -10}])
+    s = A.stats_trades(tl)
+    assert s["n"] == 4 and abs(s["hit_rate"] - 0.5) < 1e-9
+    assert abs(s["profit_factor"] - (80 / 30)) < 1e-6
+
+
+def test_decaimiento_estados():
+    from patrones import analitica as A
+    assert A.decaimiento(1.0, 1.2, n=5)["estado"] == "MUESTRA_INSUFICIENTE"
+    assert A.decaimiento(1.1, 1.2, n=50)["estado"] == "OK"
+    assert A.decaimiento(0.9, 1.2, n=50)["estado"] == "VIGILAR"
+    assert A.decaimiento(0.3, 1.2, n=50)["estado"] == "DEGRADADO"
