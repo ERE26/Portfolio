@@ -617,7 +617,7 @@ def test_rankear_conviccion_gate_y_orden(monkeypatch):
         "ret_sesion": [0.01, 0.015, 0.02, 0.008, 0.03],
         "dist_vwap": [0.005]*5, "atr_pct": [0.01]*5, "precio": [100.0]*5,
     })
-    r = G.rankear_conviccion(opo, umbral_fuerte=1.5)
+    r = G.rankear_conviccion(opo, umbral_fuerte=1.5, umbral_conv=-1e9)  # suelo aparte (test propio)
     tickers = list(r["ticker"])
     assert "EEE" not in tickers          # filtrado por RVOL < umbral
     assert "CCC" not in tickers          # descartado por el gate (sent -0.6 < -0.35)
@@ -630,7 +630,7 @@ def test_rankear_conviccion_gate_y_orden(monkeypatch):
         "dist_vwap": [0.005, 0.005], "atr_pct": [0.01, 0.01], "precio": [100.0, 100.0]})
     sent2 = {"POS": 0.5, "NEU": 0.0}
     monkeypatch.setattr(G, "_sentimiento", lambda t: sent2.get(t, 0.0))
-    rp = G.rankear_conviccion(par, umbral_fuerte=1.5)
+    rp = G.rankear_conviccion(par, umbral_fuerte=1.5, umbral_conv=-1e9)  # suelo aparte
     assert list(rp["ticker"]) == ["POS", "NEU"]
 
 
@@ -1260,3 +1260,24 @@ def test_presupuesto_fail_safe_ante_entrada_corrupta():
     from patrones import presupuesto as P
     cap, nota = P.objetivo({"swing": ["x", None], "tsmom": [], "rotacion": None})
     assert "prior" in nota and abs(sum(cap.values()) - 1.0) < 1e-9   # nunca revienta
+
+
+def test_suelo_conviccion_descarta_setups_flojos(monkeypatch):
+    """El suelo de convicción deja fuera a los candidatos de convicción negativa
+    (rellenar huecos con setups flojos), en vez de operarlos solo por 'cumplir el gate'."""
+    import gestionar as G
+    monkeypatch.setattr(G, "_sentimiento", lambda t: 0.0)                 # sin red
+    monkeypatch.setattr("registro.ajuste_memoria", lambda ts: {})         # sin memoria
+    # 3 candidatos que pasan TODOS los gates (RVOL>=1.5, sobre VWAP, ext<4, fr>0.2%, ret>=0.3%)
+    opo = pd.DataFrame([
+        {"ticker": "FUERTE", "rvol": 4.0, "dist_vwap": 0.012, "ext": 1.2, "fuerza_rel": 0.030, "ret_sesion": 0.032},
+        {"ticker": "MEDIO",  "rvol": 2.2, "dist_vwap": 0.006, "ext": 1.0, "fuerza_rel": 0.010, "ret_sesion": 0.010},
+        {"ticker": "FLOJO",  "rvol": 1.6, "dist_vwap": 0.002, "ext": 0.9, "fuerza_rel": 0.004, "ret_sesion": 0.004},
+    ])
+    d = G.rankear_conviccion(opo, umbral_fuerte=1.5, umbral_conv=0.0)
+    assert "FLOJO" not in set(d["ticker"])          # convicción negativa -> fuera del suelo
+    assert "FUERTE" in set(d["ticker"])             # el bien fundamentado entra
+    assert (d["conviccion"] >= 0.0).all()           # nada por debajo del suelo
+    # con suelo muy alto no entra nadie (prefiere efectivo)
+    d2 = G.rankear_conviccion(opo, umbral_fuerte=1.5, umbral_conv=99.0)
+    assert len(d2) == 0

@@ -82,17 +82,29 @@ def main():
                              + G._z(pasan["fr"]).to_numpy() + 0.5 * pasan["sent"].clip(-1, 1).to_numpy()
                              + pasan["mem"].to_numpy())
             pasan = pasan.sort_values("conv", ascending=False).reset_index(drop=True)
-            elegidas = list(pasan["t"].head(3))
+            # SUELO DE CONVICCION: solo entran los >= umbral; el resto se quedan fuera
+            elegibles = pasan[pasan["conv"] >= G.UMBRAL_CONVICCION]
+            elegidas = list(elegibles["t"].head(3))
 
-    print("=" * 74)
-    print(f"PASAN LA CONFLUENCIA: {len(pasan)}  ->  se eligen las top-3 por convicción")
-    print("=" * 74)
+    print("=" * 78)
+    print(f"PASAN LA CONFLUENCIA: {len(pasan)}  ->  suelo de convicción >= {G.UMBRAL_CONVICCION:.2f}, "
+          f"top-3 elegibles entran")
+    print("=" * 78)
     if len(pasan):
-        print(f"  {'':2}{'ticker':<7}{'RVOL':>6}{'VWAP':>8}{'sesión':>8}{'f.rel':>8}{'ext':>6}{'sent':>7}{'conv':>7}")
+        print(f"  {'':14}{'ticker':<7}{'RVOL':>6}{'VWAP':>8}{'sesión':>8}{'f.rel':>8}{'ext':>6}{'sent':>7}{'conv':>7}")
         for i, r in pasan.iterrows():
-            marca = "✓ ELEGIDA" if r["t"] in elegidas else "  en cola"
-            print(f"  {marca:<10} {r['t']:<6}{r['rvol']:>6.2f}{r['dvwap']*100:>7.2f}%{r['ret']*100:>7.2f}%"
+            if r["t"] in elegidas:
+                marca = "ELEGIDA"
+            elif r["conv"] >= G.UMBRAL_CONVICCION:
+                marca = "elegible s/hueco"      # pasa el suelo pero sin hueco
+            else:
+                marca = "BAJO SUELO"             # convicción < suelo -> NO entra (antes sí)
+            print(f"  {marca:<14} {r['t']:<6}{r['rvol']:>6.2f}{r['dvwap']*100:>7.2f}%{r['ret']*100:>7.2f}%"
                   f"{r['fr']*100:>7.2f}%{r['ext']:>6.1f}{r['sent']:>+7.2f}{r['conv']:>7.2f}")
+        nbajo = int((pasan["conv"] < G.UMBRAL_CONVICCION).sum())
+        if nbajo:
+            print(f"\n  ({nbajo} pasan la confluencia pero quedan BAJO el suelo de convicción -> "
+                  f"NO se operan; mejor efectivo que un setup flojo.)")
     else:
         print("  (ninguna) -> EFECTIVO: mejor no operar que operar mal.")
 

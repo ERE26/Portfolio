@@ -50,6 +50,12 @@ EUROPA = [
 EXT_MAX = 4.0          # no perseguir: como mucho 4 ATR por encima del VWAP
 MARGEN_FR = 0.002      # fuerza relativa: batir al mercado por >=0.2% hoy
 RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
+# SUELO DE CONVICCION: tras pasar todos los gates, solo se OPERA el candidato cuya
+# conviccion (z(rvol)+z(ret)+z(fr)+0.5·cat+mem) sea >= este umbral. Evita rellenar los
+# huecos con setups flojos (convicción negativa = por debajo de la media del grupo de
+# hoy): mejor quedarse en efectivo que operar mal. No limita re-comprar un líder que
+# siga fuerte; solo exige que la decisión esté BIEN FUNDAMENTADA.
+UMBRAL_CONVICCION = 0.0
 
 
 # reservados al Libro C (TSMOM cross-asset): se excluyen del intradia para que los
@@ -231,7 +237,8 @@ def _z(s):
 
 
 def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35,
-                       ext_max=EXT_MAX, margen_fr=MARGEN_FR, ret_min=RET_MIN):
+                       ext_max=EXT_MAX, margen_fr=MARGEN_FR, ret_min=RET_MIN,
+                       umbral_conv=UMBRAL_CONVICCION):
     """Elige SOLO las mejores por CONFLUENCIA: un candidato no entra por 'cumplir el
     minimo', sino por pasar VARIAS confirmaciones independientes a la vez. Luego se
     ordena por un score de conviccion y se opera el top (o efectivo si nada pasa).
@@ -273,6 +280,9 @@ def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35,
     fr = _z(d["fuerza_rel"]).to_numpy() if "fuerza_rel" in d else 0.0
     d["conviccion"] = (_z(d["rvol"]).to_numpy() + _z(d["ret_sesion"]).to_numpy()
                        + fr + 0.5 * cat.to_numpy() + d["mem"].to_numpy())
+    # SUELO DE CONVICCION: solo entran los BIEN FUNDAMENTADOS (>= umbral); el resto, fuera
+    # (mejor efectivo que rellenar huecos con setups de convicción negativa).
+    d = d[d["conviccion"] >= umbral_conv]
     return d.sort_values("conviccion", ascending=False).reset_index(drop=True)
 
 
@@ -404,8 +414,9 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                 except Exception as e:
                     print(f"  {s['ticker']}: salto ({str(e)[:50]})")
         elif libres:
-            print(f"\n{libres} hueco(s) libre(s), pero NINGUN candidato pasa la "
-                  f"confluencia de calidad: EFECTIVO (mejor no operar que operar mal).")
+            print(f"\n{libres} hueco(s) libre(s), pero NINGUN candidato pasa la confluencia "
+                  f"+ suelo de convicción (>= {UMBRAL_CONVICCION:.2f}): EFECTIVO (mejor no operar "
+                  f"que operar mal).")
 
     print("\nTOP MOMENTUM DIARIO (oportunidades swing):")
     for t, m in escaneo_diario().items():
