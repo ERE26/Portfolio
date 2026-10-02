@@ -126,6 +126,7 @@
     <nav class="nav">
       <a href="#resumen" class="on"><span class="ic">▣</span>Resumen</a>
       <a href="#cartera"><span class="ic">▤</span>Cartera</a>
+      <a href="#intradia"><span class="ic">⟳</span>Intradía</a>
       <a href="#riesgo"><span class="ic">◆</span>Riesgo</a>
       <a href="#modelo"><span class="ic">⬡</span>Modelo</a>
       <a href="#mercado"><span class="ic">◈</span>Mercado</a>
@@ -174,6 +175,22 @@
             <div class="panel"><div class="ph"><h3>Movers del día</h3></div><div class="pb"><div class="movers" id="movers"></div></div></div>
             <div class="panel"><div class="ph"><h3>Por libro</h3></div><div class="pb"><div class="kv" id="books"></div></div></div>
           </div>
+        </div>
+      </div>
+
+      <div class="sec" id="intradia">
+        <div class="sect">Intradía · bitácora del día</div>
+        <div class="panel">
+          <div class="ph"><h3>Evolución del capital · solo hoy</h3><span class="t" id="ictag"></span></div>
+          <div class="pb" style="padding-top:8px"><div id="ichart"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="ph"><h3>Resumen de la sesión intradía</h3><span class="t">Libro A · confluencia</span></div>
+          <div class="pb"><div id="ikpi" style="display:flex;gap:16px;flex-wrap:wrap"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="ph"><h3>Bitácora — operaciones de hoy y por qué</h3><span class="t" id="bittag"></span></div>
+          <div class="scroll tblwrap"><table id="bittbl"></table></div>
         </div>
       </div>
 
@@ -345,6 +362,47 @@ $("cal").innerHTML=cal.length?cal.map(e=>`<div class="cev"><span class="tm">${(e
 
 const nw=DATA.noticias||[];
 $("news").innerHTML=nw.length?nw.map(x=>{const host=x.url?(()=>{try{return new URL(x.url).hostname.replace("www.","")}catch(e){return""}})():"";const tt=x.url?`<a href="${x.url}" target="_blank" rel="noopener">${x.titular}</a>`:x.titular;return `<div class="ni"><span class="sd" style="background:${col(x.punt)}"></span><div style="min-width:0"><div class="tt">${tt}</div><div class="mt"><span class="sym">${x.ticker}</span><span>${x.fuente||host||"—"}</span><span>${x.fecha||""}</span></div></div></div>`;}).join(""):`<div class="muted">Sin titulares.</div>`;
+
+// ---------- intradía: curva del día + KPIs + bitácora ----------
+(function(){
+  const bd=DATA.intradia||{trades:[],resumen:{}}, rs=bd.resumen||{}, tr=bd.trades||[], ci=DATA.curva_intradia||[];
+  const stv=(k,v,c2)=>`<div style="flex:1;min-width:108px"><div class="faint" style="font-size:10px;letter-spacing:.09em;text-transform:uppercase">${k}</div><div style="font-size:17px;font-weight:800;margin-top:3px" class="${c2||''}">${v}</div></div>`;
+  const pf=rs.profit_factor;
+  $("ikpi").innerHTML = rs.n_total ? [
+    stv("Operaciones", `${rs.n_total}`+(rs.n_abiertas?` <span class="faint" style="font-size:11px">· ${rs.n_abiertas} abiertas</span>`:"")),
+    stv("P&L día (intradía)", money(rs.pnl_total||0), cls(rs.pnl_total)),
+    stv("Win-rate", rs.win_rate==null?"—":pct(rs.win_rate,0)+` <span class="faint" style="font-size:11px">${rs.ganadoras}/${(rs.ganadoras||0)+(rs.perdedoras||0)}</span>`, (rs.win_rate||0)>=0.5?"up":"warn"),
+    stv("Profit factor", pf==null?"—":pf.toFixed(2), (pf||0)>=1?"up":"down"),
+    stv("Mejor / peor", (rs.mejor==null?"—":money(rs.mejor))+" / "+(rs.peor==null?"—":money(rs.peor))),
+    stv("Hold medio", rs.hold_medio_min==null?"—":Math.round(rs.hold_medio_min)+" min"),
+    stv("RVOL medio", rs.rvol_medio==null?"—":rs.rvol_medio.toFixed(2)),
+  ].join("") : `<div class="muted" style="padding:6px 0">Sin operaciones intradía hoy todavía.</div>`;
+
+  $("ictag").textContent = ci.length?`${ci.length} puntos · 5-min`:"";
+  const box=$("ichart");
+  if(ci.length<2){box.innerHTML="<div class='muted' style='padding:40px 16px'>La curva intradía se puebla durante la sesión (Alpaca, 5-min).</div>";}
+  else{
+    const W=960,H=240,P={l:4,r:62,t:14,b:22};
+    const v=ci.map(p=>p.pl_pct);let lo=Math.min(...v,0),hi=Math.max(...v,0);const pd=(hi-lo)*0.18||.0008;lo-=pd;hi+=pd;
+    const x=i=>P.l+(W-P.l-P.r)*(i/(ci.length-1)),y=val=>P.t+(H-P.t-P.b)*(1-(val-lo)/(hi-lo));
+    const path=a=>a.map((val,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(val).toFixed(1)).join(" ");
+    const area=path(v)+` L ${x(v.length-1).toFixed(1)} ${y(lo).toFixed(1)} L ${x(0).toFixed(1)} ${y(lo).toFixed(1)} Z`;
+    const up=v[v.length-1]>=0,acc=up?"var(--up)":"var(--down)";
+    let g="";for(let k=0;k<=4;k++){const val=lo+(hi-lo)*k/4,yy=y(val).toFixed(1);g+=`<line x1="${P.l}" y1="${yy}" x2="${W-P.r}" y2="${yy}" stroke="var(--line2)"/><text x="${W-P.r+7}" y="${(+yy+3.5).toFixed(1)}" fill="var(--faint)" font-size="11">${(val*100>=0?'+':'')+(val*100).toFixed(2)}%</text>`;}
+    const nb=ci.length,st=Math.max(1,Math.floor(nb/7));let xl="";for(let i=0;i<nb;i+=st)xl+=`<text x="${x(i).toFixed(1)}" y="${H-6}" fill="var(--faint)" font-size="10.5" text-anchor="middle">${ci[i].hora}</text>`;
+    const lv=v[nb-1],ex=x(nb-1),ey=y(lv);
+    box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"><defs><linearGradient id="fi" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${acc}" stop-opacity=".22"/><stop offset="1" stop-color="${acc}" stop-opacity="0"/></linearGradient></defs>
+      ${g}${xl}<path d="${area}" fill="url(#fi)"/><path d="${path(v)}" fill="none" stroke="${acc}" stroke-width="2.2"/>
+      <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="3.4" fill="${acc}"/>
+      <rect x="${(W-P.r+2).toFixed(1)}" y="${(ey-9).toFixed(1)}" width="60" height="18" rx="3" fill="${acc}"/><text x="${(W-P.r+32).toFixed(1)}" y="${(ey+3.5).toFixed(1)}" fill="#06231a" font-size="11" font-weight="800" text-anchor="middle">${(lv*100>=0?'+':'')+(lv*100).toFixed(2)}%</text></svg>
+      <div class="faint" style="font-size:11px;margin-top:4px;font-weight:600">— equity de la sesión de hoy (vs apertura) · no la posición histórica de Alpaca</div>`;
+  }
+
+  $("bittag").textContent = tr.length?`${tr.length} operaciones`:"";
+  const rp=r=>{const badge=r.resultado==="win"?`<span class="up" style="font-weight:800">GANA</span>`:r.resultado==="loss"?`<span class="down" style="font-weight:800">PIERDE</span>`:`<span class="muted">abierta</span>`;
+    return `<tr><td>${r.hora}</td><td><b>${r.ticker}</b></td><td>${r.qty}</td><td>${n2(r.entrada)}</td><td>${r.salida==null?"—":n2(r.salida)}</td><td class="${r.pnl==null?'muted':cls(r.pnl)}">${r.pnl==null?"—":money(r.pnl)}</td><td>${badge}</td><td>${r.hold_min==null?"—":r.hold_min+"m"}</td><td class="faint" style="font-weight:600;min-width:260px">${r.motivo||"—"}</td></tr>`;};
+  $("bittbl").innerHTML=`<thead><tr><th>Hora</th><th>Ticker</th><th>Cant.</th><th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>Resultado</th><th>Hold</th><th>Motivo (por qué)</th></tr></thead><tbody>`+(tr.length?tr.map(rp).join(""):`<tr><td colspan="9" class="muted" style="padding:18px">Sin operaciones intradía hoy.</td></tr>`)+`</tbody>`;
+})();
 
 // ---------- modelo: red de importancia + edge matrix ----------
 const MD=DATA.modelo||{};

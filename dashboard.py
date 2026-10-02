@@ -165,6 +165,98 @@ def _noticias(tickers, cli, max_total=14):
     return out[:max_total]
 
 
+def _nn(x):
+    """float o None (descarta NaN) para construir el motivo sin basura."""
+    try:
+        v = float(x)
+        return v if np.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _bitacora_dia():
+    """Operaciones INTRADÍA de la sesión de HOY (America/New_York) con su MOTIVO y un
+    resumen analítico. Lee datos/trades_intradia.csv (entrada, salida, pnl, señales)."""
+    ruta = "datos/trades_intradia.csv"
+    if not os.path.exists(ruta):
+        return {"trades": [], "resumen": {}}
+    try:
+        df = pd.read_csv(ruta)
+    except Exception:
+        return {"trades": [], "resumen": {}}
+    if df.empty:
+        return {"trades": [], "resumen": {}}
+    from bitacora import describir_motivo
+    ny = "America/New_York"
+    # la columna ts mezcla timestamps naive y con zona -> format="mixed" (si no, NaT)
+    ent = pd.to_datetime(df["ts"], format="mixed", utc=True, errors="coerce").dt.tz_convert(ny)
+    sal = pd.to_datetime(df.get("salida_ts"), format="mixed", utc=True, errors="coerce").dt.tz_convert(ny)
+    hoy = pd.Timestamp.now(tz=ny).date()
+    mask = (ent.dt.date == hoy) | (sal.dt.date == hoy)
+    d = df[mask].copy()
+    if d.empty:
+        return {"trades": [], "resumen": {}}
+    d["_ent"], d["_sal"] = ent[mask], sal[mask]
+    trades = []
+    for _, r in d.sort_values("_ent").iterrows():
+        cerrado = str(r.get("resultado")) in ("win", "loss") and _nn(r.get("salida")) is not None
+        hold = None
+        if cerrado and pd.notna(r["_sal"]) and pd.notna(r["_ent"]):
+            hold = max(0.0, (r["_sal"] - r["_ent"]).total_seconds() / 60.0)
+        feats = {"rvol": _nn(r.get("rvol")), "dist_vwap": _nn(r.get("dist_vwap")),
+                 "ret_sesion": _nn(r.get("ret_sesion")), "sent_noticias": _nn(r.get("sent_noticias"))}
+        hora_m = r["_ent"].tz_convert("Europe/Madrid").strftime("%H:%M") if pd.notna(r["_ent"]) else str(r.get("hora", ""))
+        trades.append({
+            "hora": hora_m, "ticker": str(r.get("ticker", "")),
+            "qty": int(_nn(r.get("qty")) or 0), "entrada": _nn(r.get("entrada")),
+            "salida": _nn(r.get("salida")) if cerrado else None,
+            "pnl": _nn(r.get("pnl")) if cerrado else None,
+            "resultado": str(r.get("resultado")) if cerrado else "abierta",
+            "hold_min": round(hold) if hold is not None else None,
+            "rvol": _nn(r.get("rvol")),
+            "motivo": describir_motivo(feats),
+        })
+    cerr = [t for t in trades if t["resultado"] in ("win", "loss")]
+    pnls = [t["pnl"] for t in cerr if t["pnl"] is not None]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+    holds = [t["hold_min"] for t in cerr if t["hold_min"] is not None]
+    rvs = [t["rvol"] for t in trades if t["rvol"] is not None]
+    resumen = {
+        "n_total": len(trades), "n_cerradas": len(cerr), "n_abiertas": len(trades) - len(cerr),
+        "ganadoras": len(wins), "perdedoras": len(losses),
+        "win_rate": (len(wins) / len(pnls)) if pnls else None,
+        "pnl_total": float(sum(pnls)) if pnls else 0.0,
+        "pnl_medio": (float(sum(pnls)) / len(pnls)) if pnls else None,
+        "mejor": max(pnls) if pnls else None, "peor": min(pnls) if pnls else None,
+        "profit_factor": (sum(wins) / abs(sum(losses))) if (losses and sum(losses) != 0) else None,
+        "hold_medio_min": (float(np.mean(holds)) if holds else None),
+        "rvol_medio": (float(np.mean(rvs)) if rvs else None),
+    }
+    return {"trades": trades, "resumen": resumen}
+
+
+def _curva_intradia():
+    """Evolución del equity SOLO de la sesión de HOY (intradía, 5-min), no la histórica.
+    Devuelve puntos {hora (Madrid), equity, pl_pct vs apertura de sesión}."""
+    try:
+        h = AT.historia_cuenta(period="1D", timeframe="5Min")
+    except Exception:
+        return []
+    if not len(h):
+        return []
+    idx = h.index
+    try:
+        idx = (idx.tz_localize("UTC") if idx.tz is None else idx).tz_convert("Europe/Madrid")
+    except Exception:
+        pass
+    eq = h["equity"].astype(float)
+    base = float(eq.iloc[0]) if len(eq) else 0.0
+    return [{"hora": t.strftime("%H:%M"), "equity": float(e),
+             "pl_pct": (float(e) / base - 1.0) if base else 0.0}
+            for t, e in zip(idx, eq)]
+
+
 def reunir():
     from fuentes.http import Cliente
     cli = Cliente()
@@ -263,6 +355,8 @@ def reunir():
         "libros": [{"libro": k, "bruta": v["bruta"], "pl": v["pl"], "n": v["n"]}
                    for k, v in sorted(exp_libro.items(), key=lambda x: -x[1]["bruta"])],
         "curva": curva, "spy": spy,
+        "intradia": _bitacora_dia(),
+        "curva_intradia": _curva_intradia(),
         "grafico": _ohlc("SPY", cli, 70, "S&P 500 (SPY)"),
         "tearsheet": met,
         "ops": {**st, "slippage_bps": slp.get("mediana_bps", slp.get("medio_bps"))},
