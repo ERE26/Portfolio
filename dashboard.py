@@ -236,6 +236,27 @@ def _bitacora_dia():
     return {"trades": trades, "resumen": resumen}
 
 
+def _auditoria_sl():
+    """Post-mortem de los STOPS: de las intradías cerradas por SL, cuántas fueron sacadas
+    en falso (stop tight, análisis bueno) vs nos salvaron (error de compra). Lee el log que
+    genera auditoria_sl.py (datos/sl_auditoria.csv)."""
+    ruta = "datos/sl_auditoria.csv"
+    if not os.path.exists(ruta):
+        return {"resumen": {"n": 0, "falso": 0, "salvo": 0, "neutro": 0}, "recientes": []}
+    try:
+        d = pd.read_csv(ruta)
+    except Exception:
+        return {"resumen": {"n": 0, "falso": 0, "salvo": 0, "neutro": 0}, "recientes": []}
+    v = d["veredicto"].value_counts().to_dict()
+    res = {"n": int(len(d)), "falso": int(v.get("SACADA_EN_FALSO", 0)),
+           "salvo": int(v.get("SL_NOS_SALVO", 0)), "neutro": int(v.get("NEUTRO", 0))}
+    recientes = []
+    for _, r in d.tail(8).iloc[::-1].iterrows():
+        recientes.append({"ticker": str(r.get("ticker", "")), "veredicto": str(r.get("veredicto", "")),
+                          "detalle": str(r.get("detalle", ""))})
+    return {"resumen": res, "recientes": recientes}
+
+
 def _curva_intradia():
     """Evolución del equity SOLO de la sesión de HOY (intradía, 5-min), no la histórica.
     Devuelve puntos {hora (Madrid), equity, pl_pct vs apertura de sesión}."""
@@ -356,6 +377,7 @@ def reunir():
                    for k, v in sorted(exp_libro.items(), key=lambda x: -x[1]["bruta"])],
         "curva": curva, "spy": spy,
         "intradia": _bitacora_dia(),
+        "auditoria_sl": _auditoria_sl(),
         "curva_intradia": _curva_intradia(),
         "grafico": _ohlc("SPY", cli, 70, "S&P 500 (SPY)"),
         "tearsheet": met,

@@ -189,6 +189,11 @@
           <div class="pb"><div id="ikpi" style="display:flex;gap:16px;flex-wrap:wrap"></div></div>
         </div>
         <div class="panel" style="margin-top:14px">
+          <div class="ph"><h3>Auditoría de stops — ¿nos sacaron en falso o nos salvó?</h3><span class="t">1h después del SL</span></div>
+          <div class="pb"><div id="slkpi" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+            <div id="sllist" style="margin-top:10px"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
           <div class="ph"><h3>Bitácora — operaciones de hoy y por qué</h3><span class="t" id="bittag"></span></div>
           <div class="scroll tblwrap"><table id="bittbl"></table></div>
         </div>
@@ -402,6 +407,17 @@ $("news").innerHTML=nw.length?nw.map(x=>{const host=x.url?(()=>{try{return new U
   const rp=r=>{const badge=r.resultado==="win"?`<span class="up" style="font-weight:800">GANA</span>`:r.resultado==="loss"?`<span class="down" style="font-weight:800">PIERDE</span>`:`<span class="muted">abierta</span>`;
     return `<tr><td>${r.hora}</td><td><b>${r.ticker}</b></td><td>${r.qty}</td><td>${n2(r.entrada)}</td><td>${r.salida==null?"—":n2(r.salida)}</td><td class="${r.pnl==null?'muted':cls(r.pnl)}">${r.pnl==null?"—":money(r.pnl)}</td><td>${badge}</td><td>${r.hold_min==null?"—":r.hold_min+"m"}</td><td class="faint" style="font-weight:600;min-width:260px">${r.motivo||"—"}</td></tr>`;};
   $("bittbl").innerHTML=`<thead><tr><th>Hora</th><th>Ticker</th><th>Cant.</th><th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>Resultado</th><th>Hold</th><th>Motivo (por qué)</th></tr></thead><tbody>`+(tr.length?tr.map(rp).join(""):`<tr><td colspan="9" class="muted" style="padding:18px">Sin operaciones intradía hoy.</td></tr>`)+`</tbody>`;
+
+  // ---------- auditoría de stops (1h después del SL) ----------
+  const sa=DATA.auditoria_sl||{resumen:{},recientes:[]}, sr=sa.resumen||{}, sl=sa.recientes||[];
+  $("slkpi").innerHTML = sr.n ? [
+    stv("Stops auditados", `${sr.n}`),
+    stv("Sacadas en falso", `${sr.falso||0}`, (sr.falso||0)>0?"warn":""),
+    stv("El SL nos salvó", `${sr.salvo||0}`, (sr.salvo||0)>0?"up":""),
+    stv("Neutros", `${sr.neutro||0}`),
+  ].join("") : `<div class="muted" style="padding:6px 0">Aún no hay stops auditados (se revisan 1h después de cerrar por SL).</div>`;
+  const vb=v=>v==="SACADA_EN_FALSO"?`<span class="warn" style="font-weight:800">⚠ SACADA EN FALSO</span>`:v==="SL_NOS_SALVO"?`<span class="up" style="font-weight:800">✓ SL NOS SALVÓ</span>`:`<span class="muted">· neutro</span>`;
+  $("sllist").innerHTML = sl.length ? sl.map(r=>`<div style="padding:6px 0;border-top:1px solid var(--bd)"><b>${r.ticker}</b> ${vb(r.veredicto)} <span class="faint" style="font-weight:600">${r.detalle}</span></div>`).join("") : "";
 })();
 
 // ---------- modelo: red de importancia + edge matrix ----------

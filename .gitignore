@@ -13,6 +13,7 @@ datos/.fred_key
 datos/.alpaca_key
 datos/intraday/
 datos/trades_intradia.csv
+datos/sl_auditoria.csv
 datos/selectividad.json
 datos/watchlist.json
 datos/snapshots/
