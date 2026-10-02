@@ -76,6 +76,31 @@ re-validarse (DSR/PBO) antes de operar en vivo. **No está cableado a la cartera
 todavía** — es investigación validada, pendiente de tu visto bueno para montarlo
 como "Libro C".
 
+## Validación de una idea nueva (2-oct) — rotación por países europeos
+
+Momentum transversal entre 10 ETFs de país europeos operables en Alpaca (EWG, EWQ,
+EWP, EWU, EWI, EWN, EWL, EWD, EWO, EWK): largo el top-3 por momentum 6M con filtro
+SMA200, a liquidez lo demás. Backtest 2010-2026 (detalle en `analisis_europa_2026-10.md`):
+
+| | Rotación países | Mantener Europa (VGK) |
+|---|---:|---:|
+| Sharpe | **0.49** | 0.33 |
+| Max drawdown | −30.8 % | −33.2 % |
+| **Corr. con S&P 500** | **0.56** | 0.84 |
+
+Bate a comprar-y-mantener Europa y, como el TSMOM, su valor es la **descorrelación**
+(0.56 vs 0.84). **Candidato a Libro D**, pendiente de DSR/PBO antes de ir en vivo.
+El motor (momentum transversal) ya existe en `patrones/transversal.py`.
+
+## Infraestructura de datos (2-oct)
+
+Auditado el stack de fuentes (ver `fuentes_datos.md`): **no hace falta nada de
+pago**. Yahoo (ya cableado) da índices/acciones europeas, intradía europeo, EUR/USD
+y **VIX + VIX3M** (desbloquea el filtro de régimen, idea #6, gratis). El único
+límite real es de *ejecución* (Alpaca paper no llega a bolsas europeas; operamos vía
+ADRs/ETFs US-listed) — una cuenta paper de Interactive Brokers lo resolvería, pero
+no es necesaria hoy.
+
 ## Plan propuesto (cuando quieras)
 
 1. **Ahora validado:** TSMOM (`patrones/tsmom.py`). → decidir si se monta como Libro C en vivo.
