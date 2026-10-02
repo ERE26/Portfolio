@@ -57,6 +57,16 @@ EUROPA = [
 EXT_MAX = 4.0          # no perseguir: como mucho 4 ATR por encima del VWAP
 MARGEN_FR = 0.002      # fuerza relativa: batir al mercado por >=0.2% hoy
 RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
+# GATE ANTI-PARABOLA (agotamiento): NO iniciar cuando el valor esta a la vez MUY
+# estirado sobre el VWAP (>= EXT_PARAB ATR) Y ya MUY corrido en la sesion (>= RET_PARAB).
+# Es la firma de la parabola tardia: compras el pico y el stop (0.8 ATR) queda DENTRO de
+# la zona de reversion a VWAP -> el primer retroceso normal te barre. Caso real VSH
+# (2026-10-02): ext 2.79 ATR + sesion +9.2% (+18% desde minimo) -> entrada 38.805, stop
+# 38.48 tocado en 21 min -> -$105.79. Calibrado contra el historial de snapshots: este
+# combo NO aparece en ningun ganador (JPM gano con ext 3.28 pero sesion solo +1.1%; los
+# ganadores tienen sesion <3%), asi que el gate descarta VSH sin tocar ni una entrada buena.
+EXT_PARAB = 2.5        # ATRs sobre VWAP a partir de los cuales vigilamos agotamiento
+RET_PARAB = 0.06       # +6% de sesion: ya ha corrido su tramo; iniciar aqui es perseguir
 # SUELO DE CONVICCION: tras pasar todos los gates, solo se OPERA el candidato cuya
 # conviccion (z(rvol)+z(ret)+z(fr)+0.5·cat+mem) sea >= este umbral. Evita rellenar los
 # huecos con setups flojos (convicción negativa = por debajo de la media del grupo de
@@ -331,6 +341,11 @@ def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35,
         d = d[d["dist_vwap"] > 0]
     if "ext" in d:
         d = d[(d["ext"] > 0) & (d["ext"] < ext_max)]
+    # ANTI-PARABOLA: fuera los agotados (muy sobre VWAP Y ya muy corridos hoy). Ver VSH
+    # (2026-10-02) en el bloque de constantes: comprar el pico con stop dentro de la zona
+    # de reversion. El combo no toca ningun ganador del historial.
+    if "ext" in d and "ret_sesion" in d:
+        d = d[~((d["ext"] >= EXT_PARAB) & (d["ret_sesion"] >= RET_PARAB))]
     if "fuerza_rel" in d:
         d = d[d["fuerza_rel"] > margen_fr]
     if "ret_sesion" in d:
