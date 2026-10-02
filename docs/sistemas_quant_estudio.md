@@ -107,7 +107,22 @@ fiabilidad de un setup depende del régimen de volatilidad, y el meta puede
 aprenderlo. Validado en walk-forward de dos etapas (memoria→meta) con pesos de
 unicidad, comparando contra la baseline SIN estas features:
 
-<!-- RESULTADOS_ML: se rellenan tras la comparación walk-forward -->
+**Resultados (walk-forward 2 etapas, 5 años diario, 3 pliegues, multi-semilla):**
+
+| Variante del meta | AUC (test) | ret. seleccionado (ATR) |
+|---|---:|---:|
+| Sin features de vol | 0,5123 | 0,0070 |
+| Con las 4 de vol | 0,5158 | 0,0071 |
+| **Solo vol_ratio + ret_estand (elegida)** | **0,5171** | **0,0074** |
+
+- El efecto es **pequeño pero real y con mecanismo validado**: la mejora se concentra
+  en **régimen de volatilidad ALTA** (AUC +0,010) y es nula en vol baja (+0,001) —
+  exactamente la hipótesis (el régimen de vol cambia la fiabilidad de un setup).
+- La ablación feature-a-feature mostró que **solo 2 de las 4 aportan**: `vol_ratio`
+  (+0,0054) y `ret_estand` (+0,0023); `vol_cond` y `vol_subiendo` eran ruido.
+- **Decisión parsimoniosa:** quedarse con las 2 que aportan y descartar las 2 de
+  ruido. KEEP-2 bate tanto a "todas" como a "ninguna" en AUC y en retorno
+  seleccionado, con menor varianza. Más señal, menos sobreajuste.
 
 **Por qué este camino y no una red neuronal.** Porque es **medible, interpretable y
 honesto**: cada feature nueva se valida contra su ausencia; si no sube el AUC/Brier

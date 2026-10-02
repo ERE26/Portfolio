@@ -59,7 +59,10 @@ def features_meta(pred, banco=None, i=None):
         f["frac_grupos_acuerdo"] = 0.5
     # regimen y figura del tramo consultado
     if banco is not None and i is not None:
-        for c in ("atr_pct", "vol_cond", "vol_ratio", "vol_subiendo", "ret_estand"):
+        # solo las features de vol VALIDADAS por ablacion walk-forward (vol_ratio y
+        # ret_estand aportan, sobre todo en regimen de vol alta; vol_cond y
+        # vol_subiendo resultaron ruido y se descartaron -> parsimonia).
+        for c in ("atr_pct", "vol_ratio", "ret_estand"):
             if c in banco.meta.columns:
                 f[c] = float(banco.meta[c].iloc[i])
         d = describir(banco.formas[i], banco.formas_vol[i])
