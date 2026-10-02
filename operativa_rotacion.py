@@ -29,22 +29,28 @@ from fuentes import alpaca_trade as AT
 # Reservada a este libro (se excluye del intradia para no solaparse en el mismo simbolo).
 CESTA = ["EWG", "EWQ", "EWP", "EWU", "EWI", "EWN", "EWL", "EWD", "EWO", "EWK"]
 K, LOOKBACK, SKIP = 3, 126, 21          # config validada (pre-especificada)
+ADV_FRAC = 0.01                         # cap de capacidad: max 1% del volumen $ diario (ADV)
 ESTADO = "datos/rotacion_rebal.json"
 
 
-def _panel_diario(cli=None):
-    """Cierres diarios de la cesta (Yahoo; estas ETFs no estan en el almacen local)."""
+def _panel_diario(cli=None, con_adv=False):
+    """Cierres diarios de la cesta (Yahoo; estas ETFs no estan en el almacen local).
+    Con con_adv=True devuelve tambien el volumen $ diario mediano 60d por ETF (ADV),
+    para el guard de capacidad (los ETFs finos EWO/EWK no admiten posiciones grandes)."""
     from fuentes import yahoo
     from fuentes.http import Cliente
     c = cli or Cliente()
     desde = (pd.Timestamp.now() - pd.Timedelta(days=430)).strftime("%Y-%m-%d")
-    cols = {}
+    cols, adv = {}, {}
     for t in CESTA:
         try:
-            cols[t] = yahoo.historico(t, intervalo="1d", desde=desde, cliente=c)[0]["close"].astype(float)
+            df = yahoo.historico(t, intervalo="1d", desde=desde, cliente=c)[0]
+            cols[t] = df["close"].astype(float)
+            adv[t] = float((df["close"].astype(float) * df["volume"].astype(float)).tail(60).median())
         except Exception:
             continue
-    return pd.DataFrame(cols).sort_index().ffill(limit=5).dropna()
+    panel = pd.DataFrame(cols).sort_index().ffill(limit=5).dropna()
+    return (panel, adv) if con_adv else panel
 
 
 def objetivo_rotacion(panel, capital, k=K, lb=LOOKBACK, skip=SKIP):
@@ -85,7 +91,7 @@ def ejecutar(enviar=False, capital_frac=None, dias_min=25):
         print(f"LIBRO D (rotacion Europa): ultimo rebalanceo hace {(pd.Timestamp.now()-ult).days}d "
               f"(<{dias_min}); mensual, no toca.")
         return
-    panel = _panel_diario()
+    panel, adv = _panel_diario(con_adv=True)
     if panel.empty or len(panel.columns) < 4:
         print("LIBRO D: sin datos suficientes de la cesta.")
         return
@@ -93,10 +99,19 @@ def ejecutar(enviar=False, capital_frac=None, dias_min=25):
     equity = float(cta["equity"])
     capital = equity * capital_frac
     obj, mom = objetivo_rotacion(panel, capital)
+    # GUARD DE CAPACIDAD: ningun objetivo supera ADV_FRAC del volumen $ diario del ETF.
+    # Los ETFs finos (EWO ~$1M/dia, EWK ~$0.4M/dia) mueven el precio con posiciones
+    # grandes; sin esto, a cuentas >$1M el Libro D chocaria con impacto de mercado.
+    for t in list(obj):
+        tope = ADV_FRAC * adv.get(t, float("inf"))
+        if obj[t] > tope:
+            print(f"  [capacidad] {t}: objetivo ${obj[t]:,.0f} -> capado a ${tope:,.0f} "
+                  f"(1% de ${adv.get(t,0)/1e6:.1f}M ADV)")
+            obj[t] = tope
     pos = AT.posiciones()
     nombres = sorted(set(obj) | set(t for t in CESTA if t in pos))
     px = AT.precio_actual(nombres) if nombres else {}
-    print(f"LIBRO D ROTACION EUROPA | capital ${capital:,.0f} ({capital_frac:.0%} del equity)")
+    print(f"LIBRO D ROTACION EUROPA | capital ${capital:,.0f} ({capital_frac:.1%} del equity)")
     print("Momentum 6m por pais (señal):")
     for t in CESTA:
         m = float(mom.get(t, float("nan")))

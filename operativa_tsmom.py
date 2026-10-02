@@ -98,7 +98,7 @@ def ejecutar(enviar=False, capital_frac=None, dias_min=25):
     nombres = sorted(set(obj) | set(t for t in CESTA if t in pos))
     px = AT.precio_actual(nombres) if nombres else {}
     print(f"LIBRO C TSMOM (cross-asset, long/flat) | capital ${capital:,.0f} "
-          f"({capital_frac:.0%} del equity)")
+          f"({capital_frac:.1%} del equity)")
     print("Señal TSMOM del dia (signo del propio pasado):")
     for t in CESTA:
         s = float(sig.get(t, float("nan")))
