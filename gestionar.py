@@ -55,6 +55,10 @@ RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
 # reservados al Libro C (TSMOM cross-asset): se excluyen del intradia para que los
 # libros no se solapen en el mismo simbolo (una posicion por ticker en Alpaca).
 RESERVADOS_TSMOM = {"SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "HYG"}
+# reservados al Libro D (rotacion por paises europeos, candidato en observacion): sus
+# 10 ETFs de pais los gestiona el libro mensual, no el intradia.
+RESERVADOS_ROTACION = {"EWG", "EWQ", "EWP", "EWU", "EWI", "EWN", "EWL", "EWD", "EWO", "EWK"}
+RESERVADOS = RESERVADOS_TSMOM | RESERVADOS_ROTACION
 
 
 def universo_dinamico(con_europa=True):
@@ -70,7 +74,7 @@ def universo_dinamico(con_europa=True):
     u = set(UNIVERSO) | set(extra)
     if con_europa:
         u |= set(EUROPA)
-    return sorted(u - RESERVADOS_TSMOM)
+    return sorted(u - RESERVADOS)      # excluye reservados del Libro C (TSMOM) y D (rotacion)
 
 
 def señal(ticker, intervalo="15Min"):
