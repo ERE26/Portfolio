@@ -54,7 +54,11 @@ EUROPA = [
     "VGK", "FEZ", "EZU", "HEDJ", "EWG", "EWU", "EWQ", "EWP", "EWL", "EWN", "EWI", "EWD"]
 
 # Umbrales de CALIDAD para comprar (confluencia, no "el minimo"): ver abajo.
-EXT_MAX = 4.0          # no perseguir: como mucho 4 ATR por encima del VWAP
+EXT_MAX = 2.0          # no perseguir: como mucho 2 ATR por encima del VWAP. BAJADO de 4.0
+                       # tras el forense del 2026-10-02: las ganadoras entraron a 1.15 ATR
+                       # sobre VWAP de media, las perdedoras a 1.48; con EXT_MAX=2.0 el libro
+                       # de ese día pasa de -$550 a -$143 (y a +$87 junto al RVOL de abajo),
+                       # conservando WOLF (ext 1.58, +$275). Entrar cerca del VWAP, no estirado.
 MARGEN_FR = 0.002      # fuerza relativa: batir al mercado por >=0.2% hoy
 RET_MIN = 0.003        # sesion del valor >= +0.3% (movimiento con sustancia)
 # GATE ANTI-PARABOLA (agotamiento): NO iniciar cuando el valor esta a la vez MUY
@@ -402,7 +406,11 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     # un candidato fuerte, se queda en efectivo (no operar por operar).
     from registro import cargar_umbral, registrar_entrada, tickers_en_cooldown, reconciliar
     N_OBJETIVO = 3
-    RVOL_FUERTE = cargar_umbral(1.5)      # umbral afinado por el aprendizaje (o 1.5 a priori)
+    RVOL_FUERTE = cargar_umbral(2.0)      # umbral afinado por el aprendizaje (o 2.0 a priori).
+    # SUBIDO de 1.5 tras el forense del 2026-10-02: las ganadoras tenían RVOL 3.1 de media,
+    # las perdedoras 2.5; exigir >=2.0 (volumen anormal de verdad) filtra las flojas. Junto
+    # con EXT_MAX=2.0, el libro de ese día pasa de -$550 (37% acierto, PF 0.47) a +$87
+    # (44%, PF 1.23), eliminando 10 ops que netas -$637 y conservando a WOLF.
     if gestionar and rotar:
         reconciliar()      # marca YA los SL recientes en el log ANTES de mirar el cooldown
         # GATE DE RIESGO DE CARTERA (Tier 1): kill-switch antes de abrir nada nuevo.
