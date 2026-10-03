@@ -94,6 +94,13 @@ def ordenes_abiertas():
     return r.json()
 
 
+def orden(oid):
+    """Una orden por id (para leer filled_avg_price y medir el slippage de ejecución)."""
+    r = requests.get(_url(f"orders/{oid}"), headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def precio_actual(tickers):
     """Ultimo precio (trade) de varios tickers desde el feed de datos."""
     from .alpaca import _claves as _ck
