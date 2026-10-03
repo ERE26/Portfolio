@@ -70,8 +70,21 @@ def e_gap_and_go(f, fr, c):
             and 0 < f["ext"] < c["p"]["ext_max"])
 
 
+def e_gap_orb(f, fr, c):
+    """GAP-AND-GO textbook: abrió con hueco >=2% (catalizador) Y rompe el máximo del rango
+    de apertura en las primeras 2h, con volumen y fuerza. Stop al mínimo del rango. Es el
+    setup que de verdad operan los day-traders profesionales (catalizador + confirmación +
+    riesgo propio)."""
+    ok = (f["gap"] >= 0.02 and c["or_high"] is not None and 2 <= c["k"] <= 8
+          and f["precio"] > c["or_high"] and f["dist_vwap"] > 0
+          and f["rvol"] >= c["p"]["rvol_min"] and fr > G.MARGEN_FR and f["ret_reciente"] > 0)
+    if ok:
+        c["sl_px"] = c["or_low"]
+    return ok
+
+
 ESTRATEGIAS = {"momentum": e_momentum, "pullback_vwap": e_pullback_vwap,
-               "orb": e_orb, "gap_and_go": e_gap_and_go}
+               "orb": e_orb, "gap_and_go": e_gap_and_go, "gap_orb": e_gap_orb}
 
 
 def _simular_dia(entrada_fn, close, high, low, pre, dia_pos, spy_ret_pos, p):
