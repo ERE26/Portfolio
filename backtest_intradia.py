@@ -72,7 +72,8 @@ def _precarga(df):
     return {"dist_vwap": r["intra_dist_vwap"].to_numpy(),
             "ret_sesion": r["intra_ret_sesion"].to_numpy(),
             "rvol": rvol(df).to_numpy(),
-            "atr": atr.to_numpy()}
+            "atr": atr.to_numpy(),
+            "gap": r["intra_gap"].to_numpy()}            # gap de apertura (open vs cierre previo)
 
 
 def _feats(df_close, pre, i):
@@ -89,7 +90,7 @@ def _feats(df_close, pre, i):
     pend = float(np.polyfit(x, y, 1)[0]) if len(y) >= 3 else 0.0
     return {"precio": precio, "dist_vwap": dv, "ext": ext, "atr_pct": atr_pct,
             "rvol": float(pre["rvol"][i]), "ret_sesion": float(pre["ret_sesion"][i]),
-            "ret_reciente": ret_reciente, "pend": pend}
+            "ret_reciente": ret_reciente, "pend": pend, "gap": float(pre["gap"][i])}
 
 
 def _pasa_gates(f, fr, p):
@@ -131,13 +132,16 @@ def _simular_dia(df_close, high, low, pre, dia_pos, spy_ret_pos, p):
     return None
 
 
-def _simular_trade(close, high, low, pre, pos_sig, dia_last, f, p):
+def _simular_trade(close, high, low, pre, pos_sig, dia_last, f, p, sl_px=None):
     i_in = pos_sig + 1
     entry = float(close[i_in]) * (1 + SLIP)             # fill al open~close de la barra sig. + slippage
     atrp = f["atr_pct"]
     if atrp <= 0:
         return None
-    rdist = p["k_sl"] * atrp * entry                    # = entry - sl (1R en $)
+    if sl_px is not None and sl_px < entry:             # stop propio del setup (p.ej. mínimo del rango)
+        rdist = entry - sl_px
+    else:
+        rdist = p["k_sl"] * atrp * entry                # = entry - sl (1R en $), por ATR
     if rdist <= 0:
         return None
     sl = entry - rdist

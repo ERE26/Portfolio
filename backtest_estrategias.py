@@ -47,28 +47,45 @@ def e_pullback_vwap(f, fr, c):
 
 
 def e_orb(f, fr, c):
-    """Opening-Range Breakout: romper el máximo de los primeros 30 min, dentro de las
-    primeras 2h, con volumen, fuerza relativa y no sobre-extendido."""
-    return (c["or_high"] is not None and 2 <= c["k"] <= 8
-            and f["precio"] > c["or_high"]
-            and f["rvol"] >= c["p"]["rvol_min"] and fr > G.MARGEN_FR
-            and 0 < f["ext"] < c["p"]["ext_max"] and f["ret_reciente"] > 0)
+    """Opening-Range Breakout BIEN HECHO: romper el máximo de los primeros 30 min, dentro de
+    las primeras 2h, con volumen y fuerza relativa. STOP en el MÍNIMO del rango de apertura
+    (riesgo propio del setup, no un ATR genérico) -> se fija en ctx['sl_px']."""
+    ok = (c["or_high"] is not None and 2 <= c["k"] <= 8
+          and f["precio"] > c["or_high"]
+          and f["rvol"] >= c["p"]["rvol_min"] and fr > G.MARGEN_FR
+          and f["ret_reciente"] > 0)
+    if ok:
+        c["sl_px"] = c["or_low"]        # stop al mínimo del rango de apertura
+    return ok
 
 
-ESTRATEGIAS = {"momentum": e_momentum, "momentum_am": e_momentum_am,
-               "pullback_vwap": e_pullback_vwap, "orb": e_orb}
+def e_gap_and_go(f, fr, c):
+    """Gap-and-go: el valor ABRIÓ con hueco al alza >=3% (proxy de catalizador/noticia),
+    y en la primera 1.5h sigue por encima del VWAP, con volumen, fuerza relativa y sin
+    haberse girado (momentum reciente > 0). Es el momentum CON catalizador que de verdad
+    continúa, no el genérico."""
+    return (f["gap"] >= 0.03 and c["mins"] <= 90
+            and f["dist_vwap"] > 0 and f["rvol"] >= c["p"]["rvol_min"]
+            and fr > G.MARGEN_FR and f["ret_reciente"] > 0
+            and 0 < f["ext"] < c["p"]["ext_max"])
+
+
+ESTRATEGIAS = {"momentum": e_momentum, "pullback_vwap": e_pullback_vwap,
+               "orb": e_orb, "gap_and_go": e_gap_and_go}
 
 
 def _simular_dia(entrada_fn, close, high, low, pre, dia_pos, spy_ret_pos, p):
     or_high = max(high[dia_pos[0]], high[dia_pos[1]]) if len(dia_pos) >= 2 else None
+    or_low = min(low[dia_pos[0]], low[dia_pos[1]]) if len(dia_pos) >= 2 else None
     for k, pos in enumerate(dia_pos[:-1]):
         f = bi._feats(close, pre, pos)
         if f is None:
             continue
         fr = f["ret_sesion"] - spy_ret_pos.get(pos, 0.0)
-        ctx = {"p": p, "mins": k * 15, "k": k, "or_high": or_high}
+        ctx = {"p": p, "mins": k * 15, "k": k, "or_high": or_high, "or_low": or_low, "sl_px": None}
         if entrada_fn(f, fr, ctx):
-            return bi._simular_trade(close, high, low, pre, pos, dia_pos[-1], f, p)
+            return bi._simular_trade(close, high, low, pre, pos, dia_pos[-1], f, p,
+                                     sl_px=ctx.get("sl_px"))
     return None
 
 
