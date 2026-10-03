@@ -48,3 +48,29 @@ Sesgo de supervivencia; datos IEX (no SIP); el suelo de convicción (z-score de 
 replica por-barra; una entrada por ticker-día. El edge es fino: la ejecución y el slippage
 importan. Apto para paper; en real exigiría ejecución ajustada y vigilancia de la auditoría
 de stops en vivo.
+
+## Fase 2 (oct 2026): meta-labeling, features y cartera — el salto cuant
+
+Sobre 10.074 breakouts ORB-5min reales (150 tickers, 24m):
+- **Meta-modelo ML (López de Prado)** — NO mejora de forma robusta el ORB (logística peor;
+  HGB +0.02R pero DSR 0.93/PBO 0.29, no concluyente). Confirma a **Carver**: la complejidad
+  no paga cuando la señal base ya captura el edge.
+- **Lo que SÍ descubrió el análisis (importancia de features): la ruptura CONFIRMADA.**
+  Exigir que la vela CIERRE sobre el máximo del rango (ext_breakout>0): +0.61R vs +0.27R del
+  baseline (entrada al máximo); las falsas rupturas (mecha) pierden -0.37R. Aguanta OOS.
+  En el simulador realista (entrada al CIERRE de la vela confirmada) el edge es +0.26R/trade,
+  CONSISTENTE en 3 semillas (+0.30/+0.23/+0.24), frente al no-confirmado +1.4R pero salvaje.
+- **Cartera (vol-targeting + half-Kelly, top-N in-play/día):** Sharpe MUY sensible al coste de
+  entrada. Con el haircut REALISTA (0.37R, = la diferencia entre entrada al máximo y entrada
+  confirmada real): **Sharpe ~1.8, DSR 0.80 (no robusto al 0.95)**. El Sharpe 4 del haircut
+  optimista es un espejismo. Antes de sesgo de supervivencia.
+
+### Conclusión honesta
+El ORB-5min-confirmado sobre stocks-in-play es un edge REAL y validado OOS (+0.26R/trade),
+pero MODESTO y FRÁGIL a la ejecución: el Sharpe de cartera plausible es ~1.5-2 (no 4), y
+cae por debajo de lo robusto si la ejecución es mala. Coincide con la literatura (Zarattini
+"stocks in play" ~2.8 con sus propias salvedades; réplicas: break-even a ~2.2c/acción). Es un
+salto enorme frente al momentum muerto (-0.3R), pero NO es una máquina de imprimir: su
+viabilidad depende de la calidad de ejecución. Siguiente: modelar ejecución (limit en el
+máximo), universo point-in-time (quitar supervivencia), filtro de régimen, y paper-trading
+para medir el slippage REAL antes de nada.
