@@ -4,10 +4,11 @@ Para que sirve aqui: quitar el sesgo de supervivencia. Yahoo solo sirve los
 valores que siguen cotizando; Massive lista tambien los tickers deslistados
 (active=false, con fecha de baja) y, segun plan, sus barras historicas.
 
-La clave se lee de la variable de entorno MASSIVE_API_KEY y viaja en la cabecera
-Authorization (no en la URL), para que no acabe en logs ni en mensajes de error.
-El plan gratis (Stocks Basic) limita a ~5 peticiones/minuto: el cliente espaciado
-de este modulo respeta ese ritmo.
+La clave se lee de la variable de entorno MASSIVE_API_KEY (con respaldo en
+datos/.massive_key, que esta en .gitignore) y viaja en la cabecera Authorization
+(no en la URL), para que no acabe en logs ni en mensajes de error. Nunca se
+hardcodea. El plan gratis (Stocks Basic) limita a ~5 peticiones/minuto: el
+cliente espaciado de este modulo respeta ese ritmo.
 """
 import os
 import time
@@ -21,11 +22,26 @@ COLUMNAS = ["open", "high", "low", "close", "volume"]
 PAUSA_MIN = 12.5  # s entre peticiones: 60/5 req/min + margen
 
 
-def clave():
-    k = os.environ.get("MASSIVE_API_KEY", "").strip()
+def _claves(k=None):
+    """API key de Massive. Prioridad: argumento -> env MASSIVE_API_KEY ->
+    primera linea de datos/.massive_key o ~/.massive_key (gitignored). Nunca se
+    escribe en la URL ni se registra; solo viaja en la cabecera Authorization."""
+    k = (k or os.environ.get("MASSIVE_API_KEY") or "").strip()
     if not k:
-        raise RuntimeError("Falta la variable de entorno MASSIVE_API_KEY")
+        for ruta in ("datos/.massive_key", os.path.expanduser("~/.massive_key")):
+            if os.path.exists(ruta):
+                lineas = open(ruta).read().split()
+                if lineas:
+                    k = lineas[0].strip()
+                    break
+    if not k:
+        raise RuntimeError("Falta la API key de Massive (env MASSIVE_API_KEY "
+                           "o datos/.massive_key)")
     return k
+
+
+# Alias retrocompatible: antes la funcion se llamaba clave().
+clave = _claves
 
 
 class ClienteMassive:
@@ -33,7 +49,7 @@ class ClienteMassive:
 
     def __init__(self, pausa_min=PAUSA_MIN, cache_dir="datos/cache", ttl=24 * 3600):
         self.cli = Cliente(cache_dir=cache_dir, ttl=ttl, reintentos=4, pausa=15.0)
-        self.cli.sesion.headers["Authorization"] = f"Bearer {clave()}"
+        self.cli.sesion.headers["Authorization"] = f"Bearer {_claves()}"
         self.pausa_min = pausa_min
         self._ultima = 0.0
         self.llamadas = 0

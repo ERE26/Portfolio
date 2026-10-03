@@ -11,6 +11,7 @@ datos/mercado/
 .DS_Store
 datos/.fred_key
 datos/.alpaca_key
+datos/.massive_key
 datos/intraday/
 datos/trades_intradia.csv
 datos/sl_auditoria.csv
