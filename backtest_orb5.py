@@ -42,12 +42,19 @@ def _opening_rvol(df):
     return rv                                    # indexado por día (normalizado)
 
 
-def _sim(close, high, low, dia_pos, or_hi, or_lo, modo, trail_atr, atr_abs):
-    """Simula un ORB long en un día. dia_pos[0] es la vela del rango de apertura."""
-    # entrada: primera vela POSTERIOR cuyo high rompe el máximo del rango
+def _sim(close, high, low, dia_pos, or_hi, or_lo, modo, trail_atr, atr_abs, confirmado=False):
+    """Simula un ORB long en un día. dia_pos[0] es la vela del rango de apertura.
+    confirmado=False: entra al tocar el máximo del rango (stop-order). confirmado=True:
+    espera a que una vela CIERRE sobre el máximo (ruptura confirmada, evita falsas mechas) y
+    entra a ese cierre — peor precio, pero filtra las rupturas falsas (-0.37R)."""
     entry = None
     for j in dia_pos[1:]:
-        if high[j] >= or_hi:
+        if confirmado:
+            if close[j] > or_hi:
+                entry = close[j] * (1 + SLIP)    # entra al CIERRE de la vela que confirma
+                i_in = j
+                break
+        elif high[j] >= or_hi:
             entry = or_hi * (1 + SLIP)           # stop-order en el máximo del rango
             i_in = j
             break
@@ -78,7 +85,7 @@ def _sim(close, high, low, dia_pos, or_hi, or_lo, modo, trail_atr, atr_abs):
     return {"R": (exit_px - entry) / rdist, "reason": reason}
 
 
-def backtest(tickers_n=60, dias=25, meses=12, seed=42, rvol_min=1.0):
+def backtest(tickers_n=60, dias=25, meses=12, seed=42, rvol_min=1.0, confirmado=False):
     rng = random.Random(seed)
     uni = bi._universo(n=150)
     rng.shuffle(uni); uni = uni[:tickers_n]
@@ -86,7 +93,8 @@ def backtest(tickers_n=60, dias=25, meses=12, seed=42, rvol_min=1.0):
     modos = {"EOD": ("eod", 0.0), "EOD+trail2ATR": ("trail", 2.0), "target10R": ("target", 0.0)}
     res = {m: [] for m in modos}
     n_td = 0
-    print(f"\n### ORB 5-min | {len(uni)} tickers x {dias} días | {meses} meses | seed {seed} | RVOL_ap>{rvol_min}")
+    print(f"\n### ORB 5-min | {len(uni)} tickers x {dias} días | {meses} meses | seed {seed} | "
+          f"RVOL_ap>{rvol_min} | {'RUPTURA CONFIRMADA (cierre)' if confirmado else 'al tocar máximo'}")
     for t in uni:
         try:
             df = alpaca.historico(t, "5Min", desde=desde, max_paginas=20)
@@ -114,7 +122,8 @@ def backtest(tickers_n=60, dias=25, meses=12, seed=42, rvol_min=1.0):
                 continue
             or_hi, or_lo = float(high[p0]), float(low[p0])
             for m, (modo, tr) in modos.items():
-                r = _sim(close, high, low, list(dia_pos), or_hi, or_lo, modo, tr, atr_abs_global)
+                r = _sim(close, high, low, list(dia_pos), or_hi, or_lo, modo, tr, atr_abs_global,
+                         confirmado=confirmado)
                 if r is not None:
                     res[m].append(r)
     print(f"ticker-días evaluados: {n_td}\n")
@@ -144,5 +153,6 @@ if __name__ == "__main__":
     ap.add_argument("--meses", type=int, default=12)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--rvol", type=float, default=1.0)
+    ap.add_argument("--confirmado", action="store_true", help="exigir cierre sobre el máximo del rango")
     a = ap.parse_args()
-    backtest(a.tickers, a.dias, a.meses, a.seed, a.rvol)
+    backtest(a.tickers, a.dias, a.meses, a.seed, a.rvol, a.confirmado)
