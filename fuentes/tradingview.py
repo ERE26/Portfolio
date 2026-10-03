@@ -49,13 +49,28 @@ def universo_liquido(n=300, min_precio=5.0, min_dvol=15_000_000.0, min_avgvol=1_
     return [d["symbol"] for d in rows if d.get("symbol")]
 
 
-def en_juego(n=120, min_precio=4.0, min_dvol=4_000_000.0, min_avgvol=400_000.0, min_rvol=1.1):
+# Tope de capitalización del pool intradía: se FILTRAN las large/mega-caps. El edge
+# intradía (RVOL + momentum de VWAP) está en los "stocks in play" —mid-caps líquidas que
+# SÍ se mueven—, no en las grandes, demasiado eficientes para dar el recorrido que buscamos
+# (docs/estrategia_intradia_salidas.md: "el edge está en los stocks in play, no en las
+# large-caps"). Forense 2026-10-02: las dos peores fueron TSLA ($1.46T) y TXN ($268B), y el
+# pool trae a diario large-caps de $20-47B (VST, NTAP, ON, VRSN...). Umbral $20B: large-cap
+# empieza ~$10B, así que $20B corta las large/mega dejando la franja mid/upper-mid en juego.
+# Tuneable en una línea: 10e9 para ceñirse a mid/small puro; 50e9/100e9 para solo mega-caps.
+# Nota: NKE ($50B) ganó +$128 el 2026-10-02, pero es large-cap; una sesión no tumba el
+# principio (ni la instrucción de filtrar large-caps). La auditoría medirá el efecto real.
+MAX_CAP_INTRADIA = 20_000_000_000.0     # $20B
+
+
+def en_juego(n=120, min_precio=4.0, min_dvol=4_000_000.0, min_avgvol=400_000.0, min_rvol=1.1,
+             max_cap=MAX_CAP_INTRADIA):
     """Acciones US LÍQUIDAS que están EN JUEGO ahora (RVOL alto y subiendo hoy), de TODO
     el mercado, en una sola llamada. Es el POOL DE CANDIDATOS intradía: en vez de iterar
     una lista fija de ~114, se evalúan los que de verdad se mueven hoy (sean los de
-    siempre o mid-caps nuevas). Nuestros gates (sobre barras frescas de Alpaca) deciden
-    luego cuál se opera. Devuelve símbolos ordenados por RVOL desc."""
-    cols = ["name", "relative_volume_10d_calc", "change", "Value.Traded"]
+    siempre o mid-caps nuevas). Se EXCLUYEN las large/mega-caps (market cap >= max_cap):
+    sin edge intradía. Nuestros gates (sobre barras frescas de Alpaca) deciden luego cuál
+    se opera. Devuelve símbolos ordenados por RVOL desc."""
+    cols = ["name", "relative_volume_10d_calc", "change", "Value.Traded", "market_cap_basic"]
     filtros = [
         {"left": "close", "operation": "in_range", "right": [min_precio, 5000]},
         {"left": "Value.Traded", "operation": "greater", "right": min_dvol},
@@ -65,8 +80,18 @@ def en_juego(n=120, min_precio=4.0, min_dvol=4_000_000.0, min_avgvol=400_000.0, 
         {"left": "type", "operation": "equal", "right": "stock"},
         {"left": "is_primary", "operation": "equal", "right": True},
     ]
-    rows, _ = scan(cols, sort_by="relative_volume_10d_calc", filtros=filtros, n=n)
-    return [d["symbol"] for d in rows if d.get("symbol")]
+    rows, _ = scan(cols, sort_by="relative_volume_10d_calc", filtros=filtros, n=max(n * 2, 120))
+    out = []
+    for d in rows:
+        if not d.get("symbol"):
+            continue
+        mc = d.get("market_cap_basic")
+        if mc is not None and max_cap and mc >= max_cap:   # fuera large/mega-caps (cap conocido)
+            continue
+        out.append(d["symbol"])
+        if len(out) >= n:
+            break
+    return out
 
 
 def ganadores_intradia(tf="60", n=15, min_precio=3.0, min_dvol=1_000_000.0, min_rvol=1.2):
