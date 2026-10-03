@@ -146,21 +146,31 @@ def _simular_trade(close, high, low, pre, pos_sig, dia_last, f, p, sl_px=None):
         return None
     sl = entry - rdist
     tp = entry + p["k_pt"] * atrp * entry
+    trail = p.get("trail", 0.0)                         # >0 (múltiplos de ATR) = trailing en vez de TP fijo
+    atr_abs = atrp * entry
     stop, movido, reason, exit_px = sl, False, "EOD", float(close[dia_last])
+    run_high = entry
     for j in range(i_in, dia_last + 1):
         hi, lo, cl = float(high[j]), float(low[j]), float(close[j])
         mins = (j - i_in) * 15
-        if lo <= stop:                                  # SL / BE (conservador: antes que TP)
-            exit_px = stop * (1 - SLIP_STOP); reason = "BE" if movido else "SL"; break
-        if hi >= tp:
+        if lo <= stop:                                  # stop tocado (SL / break-even / trailing)
+            reason = "TRAIL" if stop > entry * 1.0001 else ("BE" if movido else "SL")
+            exit_px = stop * (1 - SLIP_STOP); break
+        if trail <= 0 and hi >= tp:                     # TP fijo solo en modo NO-trailing
             exit_px = tp * (1 - SLIP); reason = "TP"; break
-        if p["breakeven"] and not movido and hi >= entry + rdist:   # +1R -> stop a entrada
+        run_high = max(run_high, hi)
+        if trail > 0:                                   # TRAILING: tras +1R, sube el stop bajo el máximo
+            if run_high >= entry + rdist:
+                nuevo = run_high - trail * atr_abs
+                if nuevo > stop:
+                    stop, movido = nuevo, True
+        elif p["breakeven"] and not movido and hi >= entry + rdist:   # +1R -> stop a entrada
             stop, movido = entry, True
         if _reversion(pre["dist_vwap"], close, j):
             exit_px = cl * (1 - SLIP); reason = "REV"; break
         if mins >= G.MAX_DURA_MIN:
             exit_px = cl * (1 - SLIP); reason = "TS_duro"; break
-        if mins >= G.MAX_VERDE_MIN and (cl - entry) >= 0:
+        if trail <= 0 and mins >= G.MAX_VERDE_MIN and (cl - entry) >= 0:   # time-stop verde: solo modo TP
             exit_px = cl * (1 - SLIP); reason = "TS_verde"; break
         if j == dia_last:
             exit_px = cl * (1 - SLIP); reason = "EOD"; break

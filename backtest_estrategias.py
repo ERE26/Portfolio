@@ -102,7 +102,7 @@ def _simular_dia(entrada_fn, close, high, low, pre, dia_pos, spy_ret_pos, p):
     return None
 
 
-def bakeoff(tickers_n=40, dias=12, meses=15, seed=42):
+def bakeoff(tickers_n=40, dias=12, meses=15, seed=42, trail=0.0):
     rng = random.Random(seed)
     uni = bi._universo(n=150)
     rng.shuffle(uni)
@@ -110,10 +110,11 @@ def bakeoff(tickers_n=40, dias=12, meses=15, seed=42):
     desde = (pd.Timestamp.now() - pd.Timedelta(days=int(meses * 31))).strftime("%Y-%m-%d")
     spy_idx, spy_ret = bi._spy_por_dia(meses)
     spy_map = pd.Series(spy_ret, index=pd.DatetimeIndex(spy_idx))
-    p = bi.NUEVO
+    p = {**bi.NUEVO, "trail": trail}       # trail>0 -> salida por trailing (deja correr la ganadora)
     res = {k: [] for k in ESTRATEGIAS}
     n_td = 0
-    print(f"\n### BAKE-OFF INTRADÍA | {len(uni)} tickers x {dias} días al azar | {meses} meses | seed {seed}")
+    print(f"\n### BAKE-OFF INTRADÍA | {len(uni)} tickers x {dias} días al azar | {meses} meses | "
+          f"seed {seed} | {'TRAILING ' + str(trail) + ' ATR' if trail else 'TP fijo'}")
     for t in uni:
         try:
             df = alpaca.historico(t, "15Min", desde=desde, max_paginas=12)
@@ -169,5 +170,6 @@ if __name__ == "__main__":
     ap.add_argument("--dias", type=int, default=12)
     ap.add_argument("--meses", type=int, default=15)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--trail", type=float, default=0.0, help="trailing stop en múltiplos de ATR (0=TP fijo)")
     a = ap.parse_args()
-    bakeoff(a.tickers, a.dias, a.meses, a.seed)
+    bakeoff(a.tickers, a.dias, a.meses, a.seed, a.trail)
