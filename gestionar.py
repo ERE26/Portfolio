@@ -173,8 +173,30 @@ def señal(ticker, intervalo="15Min"):
 MAX_VERDE_MIN = 90      # >=1.5h EN VERDE -> recoge el positivo y rota (no esperes a que se gire)
 MAX_DURA_MIN = 150      # >=2.5h -> time-stop duro: el setup ha caducado, cierra pase lo que pase
 
+# BREAK-EVEN STOP: en cuanto una operación alcanza +1R de beneficio (precio >= entrada +
+# 1·riesgo, siendo riesgo = entrada - SL original), se SUBE el stop a la entrada. A partir
+# de ahí la operación no puede perder: o toca el TP (+2R) o sale en ~0R. Ataca la asimetría
+# invertida del forense 2026-10-02 (solo 1/19 tocó TP; ganadoras +0.4R, perdedoras -1.1R):
+# una operación que ya probó +1R dejaba de poder convertirse en pérdida completa. NO
+# contradice la fig. 28 (no amplía el SL ni mantiene más tiempo; es protección ortogonal).
+BE_TRIGGER_R = 1.0
 
-def revisar_intradia():
+
+def _nuevo_sl_breakeven(entrada, sl_actual, precio, trig_R=BE_TRIGGER_R):
+    """Decisión pura del break-even. Si la operación ya alcanzó +trig_R (precio >= entrada +
+    trig_R·riesgo) y el stop SIGUE por debajo de la entrada, devuelve el nuevo SL = entrada
+    (break-even). Si no, None. Idempotente: una vez movido a la entrada, riesgo<=0 -> None."""
+    if entrada <= 0 or sl_actual <= 0 or precio <= 0:
+        return None
+    riesgo = entrada - sl_actual
+    if riesgo <= 0:                                  # ya en break-even o por encima
+        return None
+    if precio >= entrada + trig_R * riesgo:
+        return round(entrada, 2)
+    return None
+
+
+def revisar_intradia(mover_be=False):
     """Re-analiza cada posicion intradia con las velas nuevas y decide si cerrar.
 
     Cierra si (a) se CONFIRMA una reversion (sostenida bajo VWAP + pendiente baja +
@@ -185,6 +207,10 @@ def revisar_intradia():
     ordenes = AT.ordenes_abiertas()
     simbolos = sorted(set(o["symbol"] for o in ordenes))
     pos = AT.posiciones()
+    # SL vigente por ticker (pata 'stop' del bracket) para el break-even
+    sl_actual = {o["symbol"]: float(o["stop_price"]) for o in ordenes
+                 if o.get("side") == "sell" and o.get("type") in ("stop", "stop_limit")
+                 and o.get("stop_price")}
     try:
         from registro import tiempos_entrada
         entradas = tiempos_entrada()
@@ -213,6 +239,20 @@ def revisar_intradia():
             elif mins >= MAX_VERDE_MIN and pl_pct >= 0:
                 time_stop = True
         cerrar = reversion or time_stop
+        # BREAK-EVEN: si NO se cierra y la operación ya probó +1R, sube el stop a la entrada.
+        be = None
+        if not cerrar and t in sl_actual:
+            precio_t = pos[t].get("precio") or s.get("precio") or 0.0
+            nuevo = _nuevo_sl_breakeven(pos[t].get("entrada", 0.0), sl_actual[t], precio_t)
+            if nuevo is not None and nuevo > sl_actual[t]:
+                if mover_be:
+                    try:
+                        r = AT.mover_stop(t, nuevo, confirmar=True)
+                        be = f"break-even @{nuevo}" + ("" if r.get("movido") else f" (no: {r.get('motivo','?')})")
+                    except Exception as e:                 # un fallo de PATCH no tumba el ciclo
+                        be = f"break-even @{nuevo} FALLÓ: {str(e)[:50]}"
+                else:
+                    be = f"[dry] break-even @{nuevo}"
         if reversion:
             motivo = "REVERSION confirmada (sostenida bajo VWAP + pendiente baja)"
         elif time_stop and pl_pct >= 0 and (mins is None or mins < MAX_DURA_MIN):
@@ -223,7 +263,7 @@ def revisar_intradia():
             motivo = "bajada organica (se mantiene; SL del bracket protege)"
         else:
             motivo = "tendencia intacta"
-        out.append({"ticker": t, "pl": pl, "cerrar": cerrar, "motivo": motivo,
+        out.append({"ticker": t, "pl": pl, "cerrar": cerrar, "motivo": motivo, "be": be,
                     "dist_vwap": s["dist_vwap"], "ret_sesion": s["ret_sesion"],
                     "rvol": s["rvol"], "pend": s["pend"], "bajo_vwap": s["bajo_vwap"],
                     "min_abierta": mins if mins is not None else float("nan")})
@@ -376,13 +416,14 @@ def rankear_conviccion(opo, umbral_fuerte, excluir=(), gate_neg=-0.35,
 
 def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
     pos = AT.posiciones()
-    rev = revisar_intradia()
+    rev = revisar_intradia(mover_be=gestionar)
     print(f"Posiciones intradia (bracket): {len(rev)}")
     a_cerrar = []
     for d in rev:
+        be = f"  [{d['be']}]" if d.get("be") else ""
         print(f"  {d['ticker']:<6} PL ${d['pl']:+.0f} | VWAP {d['dist_vwap']*100:+.2f}% "
               f"sesion {d['ret_sesion']*100:+.2f}% pend {d['pend']*100:+.3f}% "
-              f"bajoVWAP {d['bajo_vwap']*100:.0f}% -> {d['motivo']}")
+              f"bajoVWAP {d['bajo_vwap']*100:.0f}% -> {d['motivo']}{be}")
         if d["cerrar"]:
             a_cerrar.append(d["ticker"])
     if a_cerrar and gestionar:

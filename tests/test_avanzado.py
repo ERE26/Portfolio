@@ -1281,3 +1281,22 @@ def test_suelo_conviccion_descarta_setups_flojos(monkeypatch):
     # con suelo muy alto no entra nadie (prefiere efectivo)
     d2 = G.rankear_conviccion(opo, umbral_fuerte=1.5, umbral_conv=99.0)
     assert len(d2) == 0
+
+
+def test_breakeven_stop_decision():
+    """El break-even: sube el stop a la entrada SOLO cuando la operación ya probó +1R,
+    y es idempotente (no vuelve a moverlo una vez en la entrada)."""
+    import gestionar as G
+    entrada, sl = 100.0, 99.0          # riesgo = 1.0 -> +1R al llegar a 101.0
+    # aún no ha alcanzado +1R -> no se mueve
+    assert G._nuevo_sl_breakeven(entrada, sl, 100.5) is None
+    assert G._nuevo_sl_breakeven(entrada, sl, 100.99) is None
+    # alcanza +1R exacto o más -> stop a la entrada (break-even)
+    assert G._nuevo_sl_breakeven(entrada, sl, 101.0) == 100.0
+    assert G._nuevo_sl_breakeven(entrada, sl, 103.0) == 100.0
+    # idempotente: ya en (o por encima de) break-even -> None
+    assert G._nuevo_sl_breakeven(entrada, 100.0, 105.0) is None
+    assert G._nuevo_sl_breakeven(entrada, 100.5, 105.0) is None
+    # datos inválidos -> None (no rompe)
+    assert G._nuevo_sl_breakeven(0.0, 99.0, 101.0) is None
+    assert G._nuevo_sl_breakeven(100.0, 0.0, 101.0) is None

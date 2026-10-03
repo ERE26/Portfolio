@@ -53,11 +53,39 @@ def cuenta():
 
 
 def posiciones():
-    """Posiciones abiertas: dict ticker -> {qty, market_value, unrealized_pl}."""
+    """Posiciones abiertas: dict ticker -> {qty, valor, pl, entrada, precio}."""
     r = requests.get(_url("positions"), headers=_headers(), timeout=30)
     r.raise_for_status()
     return {p["symbol"]: {"qty": float(p["qty"]), "valor": float(p["market_value"]),
-                          "pl": float(p["unrealized_pl"])} for p in r.json()}
+                          "pl": float(p["unrealized_pl"]),
+                          "entrada": float(p.get("avg_entry_price") or 0.0),
+                          "precio": float(p.get("current_price") or 0.0)} for p in r.json()}
+
+
+def mover_stop(ticker, nuevo_sl, confirmar=False):
+    """Mueve el STOP-LOSS (pata 'stop' del bracket) de una posición a `nuevo_sl` (PATCH del
+    propio order; Alpaca lo reemplaza manteniéndolo en el grupo OCO). Para el break-even:
+    una vez la operación ha probado +1R, se sube el stop a la entrada y ya no puede perder.
+    Busca la orden de stop abierta (sell, type stop/stop_limit) del ticker. Dry-run si
+    confirmar=False."""
+    sl_leg = None
+    for o in ordenes_abiertas():
+        if (o.get("symbol") == ticker and o.get("side") == "sell"
+                and o.get("type") in ("stop", "stop_limit") and o.get("stop_price")):
+            sl_leg = o
+            break
+    if sl_leg is None:
+        return {"omitida": True, "motivo": "sin pata de stop abierta", "ticker": ticker}
+    nuevo = round(float(nuevo_sl), 2)
+    if not confirmar:
+        return {"dry_run": True, "ticker": ticker, "order_id": sl_leg["id"],
+                "de": float(sl_leg["stop_price"]), "a": nuevo}
+    r = requests.patch(_url(f"orders/{sl_leg['id']}"), json={"stop_price": str(nuevo)},
+                       headers=_headers(), timeout=30)
+    r.raise_for_status()
+    j = r.json()
+    return {"movido": True, "ticker": ticker, "de": float(sl_leg["stop_price"]), "a": nuevo,
+            "id": j.get("id"), "status": j.get("status")}
 
 
 def ordenes_abiertas():
