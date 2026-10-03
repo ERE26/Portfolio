@@ -74,3 +74,29 @@ salto enorme frente al momentum muerto (-0.3R), pero NO es una máquina de impri
 viabilidad depende de la calidad de ejecución. Siguiente: modelar ejecución (limit en el
 máximo), universo point-in-time (quitar supervivencia), filtro de régimen, y paper-trading
 para medir el slippage REAL antes de nada.
+
+## Fase 3 (oct 2026): régimen y otras familias — qué NO añade edge
+
+Opciones 2 y 3 del plan, testeadas con el mismo rigor OOS:
+- **Filtro de régimen (HMM/Hurst/SPY-trend):** NINGÚN corte mejora el ORB de forma robusta
+  (ningún subconjunto supera DSR 0.95). 'SPY<MA50 mejor' (Sharpe 2.88) es específico del
+  periodo, no fiable. Hurst del valor no separa. -> ORB se queda SIN filtro de régimen (Carver).
+- **Mean-reversion intradía (fade de extensiones bajo VWAP en in-play):** PIERDE en 2 configs
+  (k=1.5: -0.32R, 31%; k=2.5: -0.35R, 25%). Un in-play extendido bajo VWAP suele estarlo por
+  mala noticia que continúa (navaja), no por sobreventa. El edge está en el momentum, no en
+  contrariarlo.
+
+### Mapa final del edge intradía (todo validado OOS)
+  ORB-5min confirmado, stocks-in-play, stop OR-low, hold EOD ...... EDGE (+0.26R/trade; cartera Sharpe ~2 realista)
+  momentum genérico 15m .......................................... muerto (-0.3R)
+  pullback a VWAP ................................................ muerto
+  gap-and-go solo ............................................... ruidoso/inestable
+  meta-modelo ML (filtro) ....................................... sin lift robusto
+  filtro de régimen (SPY/Hurst) ................................. sin lift robusto
+  mean-reversion a VWAP ......................................... pierde
+
+CONCLUSIÓN: el ORB-confirmado es el ÚNICO edge intradía robusto; todo lo demás testeado no
+funciona o no lo mejora de forma fiable. Es el resultado típico de la metodología honesta
+(LdP/Carver): la mayoría de ideas no sobreviven la validación OOS, y el superviviente es una
+regla simple. El muro ahora es EJECUCIÓN (solo medible en paper) y SUPERVIVENCIA (datos de
+pago). El backtest ha dado lo que podía dar.
