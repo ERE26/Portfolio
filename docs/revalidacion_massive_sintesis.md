@@ -24,6 +24,7 @@ sobre universo **point-in-time sin sesgo de supervivencia**. Honestidad > result
 | **Residual momentum** long-only | Sharpe 1,83 / CAGR 64% | **1,45 / 28%** < SPY 1,77 | ❌ | supervivencia (haircut −36 pts CAGR) |
 | Overnight **broad-stock** (equal-w, churn diario) | — | bruto +6,6%/año PERO neto<0, < SPY | ❌ | comisiones del cruce diario |
 | **Overnight QQQ + tendencia (SMA200)** | — | **Sharpe 1,30, IC95 [0,25,2,43], train≈test** | ✅ **candidato** | — (a validar ejecución en paper) |
+| **Pares OVERNIGHT** (\|z\| al cierre → MOO, market-neutral) | — | bruto ≤+1,3 bp/op (~50–52%, Sharpe/op<0); **OOS +0,16 bp**, neto<0 a 1–3 bp/pata | ❌ | ruido + gap idiosincrático (los 2 hallazgos **no se componen**) |
 
 ## El patrón honesto
 Casi todo nuestro "edge" era **sesgo de supervivencia** (ORB stock, residual momentum) o **no
@@ -107,3 +108,27 @@ pruebas** (27 por activo / 81 en cesta QQQ-SPY-IWM) y PBO/CSCV.
 **Implicación operativa:** no cablear ningún overlay en `operativa_overnight.py`;
 mantener el baseline puro. La prioridad sigue siendo **medir el slippage MOC/MOO real
 en paper** — el baseline pasa de Sharpe 1,55 a 0,55 entre 0 y 5 bps.
+
+## Actualización — par OVERNIGHT: ¿se componen los dos hallazgos reales? (NO)
+
+Idea: mezclar los **dos únicos hallazgos reales** del estudio —(1) la prima de la
+renta variable se gana **de noche** (close→open); (2) el **spread de pares revierte**
+(bruto +1,5 bp/op, 62%, pero muere al *churn* intradía)— en **un único round-trip
+nocturno**: |z| extremo al cierre → MOC (largo barata / corto cara), salir en la
+apertura siguiente (MOO). Objetivo: evitar el *churn* y capturar un movimiento mayor
+de noche. Survivorship-free (Massive EOD+minuto, 50 pares large-cap por sector,
+cribado de cointegración Engle-Granger **solo en train**, 12/50 pasan). Causal
+(beta/z con datos hasta el cierre de D). Walk-forward 60/40 con purga/embargo,
+bootstrap IC95, **DSR** (6 trials) y **test entry_lag** con barras de minuto.
+
+| Estudio | Hallazgo | Bruto / break-even | Neto OOS (c=1–3 bp/pata) | DSR | ¿Sobrevive? | Doc |
+|---|---|---|---|---|---|---|
+| **Par overnight (\|z\| cierre → MOO, market-neutral)** | Señal bruta = ruido: ≤+1,3 bp/op, acierto ~50–52%, **Sharpe/op<0** (cola izquierda por gaps); OOS +0,16 bp. Train≈test **falla** (el \|z\|≥2,5 de train, +2,76 bp, se desploma a +0,16 OOS). **entry_lag**: el sliver del print de apertura se vuelve **negativo** a los 15 min (t≈0) → microestructura, no alfa. | bruto ≤+1,3 bp; **break-even ≤0,66 bp/pata (0,08 OOS)** | **−2,3 a −3,8 bp/op** (neg. a cualquier coste) | ~0,00 (6 trials) | **No** — rechazado | [overnight_pairs_resultado.md](overnight_pairs_resultado.md) |
+
+**Por qué no se componen:** la **prima nocturna es direccional** (un par
+market-neutral no tiene exposición neta de noche → no cobra nada de ella) y la
+**reversión de pares es microestructura intradía** (muchos incrementos pequeños; no se
+concentra en un único salto nocturno, que lo domina el **gap idiosincrático** —
+resultados, noticias— que no revierte a nivel de par). Combinarlos da lo peor de cada
+mundo: ni prima ni reversión. El coste solo remata a un bruto que ya es ruido. **Se
+archiva.**
