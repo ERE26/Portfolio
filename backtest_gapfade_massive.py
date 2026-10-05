@@ -8,7 +8,9 @@ confirmacion de giro:
     la entrada (si rompe nuevos maximos, el fade fallo).
   - gap DOWN (< -umbral): LARGO cuando una vela cierra por ENCIMA del maximo de la
     1a vela. Objetivo = VWAP. Stop = minimo del dia hasta la entrada.
-Modos: 'objVWAP' (cubre/vende al tocar VWAP, si no EOD) y 'EOD' (aguanta al cierre).
+Modos: 'objGapFill' (cierra al rellenar el hueco = tocar el cierre previo, si no EOD) y
+'EOD' (aguanta al cierre). El objetivo solo cuenta si queda en el lado rentable (si el
+hueco ya se llenó antes de confirmar el giro, se aguanta a EOD).
 
 El gap se mide con el cierre previo REAL (GROUPED del dia de sesion anterior, ajustado
 -> sin falsos gaps por splits), un solo request por dia para todo el universo.
@@ -36,34 +38,36 @@ def _prev_session(fecha, cm):
     return prev[-1].strftime("%Y-%m-%d") if prev else None
 
 
-def _sim(close, high, low, vwap, i_in, lado, stop):
+def _sim(close, high, low, obj, i_in, lado, stop):
     """Simula el fade desde la barra de entrada i_in. lado=+1 largo, -1 corto.
-    Devuelve (R_objVWAP, R_EOD)."""
+    obj = objetivo de gap-fill (cierre previo). Devuelve {objGapFill, EOD}."""
     n = len(close)
     entry = float(close[i_in]) * (1 + H.SLIP * lado)
     rdist = abs(entry - stop)
     if rdist <= 0:
         return None
-    obj = float(vwap[i_in])            # objetivo = VWAP en el momento de entrada
+    # El objetivo solo es valido si esta en el lado RENTABLE de la entrada (si el gap ya
+    # se lleno antes de confirmar el giro, no hay objetivo -> se aguanta a EOD).
+    obj_valido = (lado > 0 and obj > entry) or (lado < 0 and obj < entry)
     out = {}
-    # modo objetivo VWAP
-    exit_px, _ = float(close[n - 1]), "EOD"
+    # modo objetivo gap-fill (cierre previo)
+    exit_px = float(close[n - 1])
     for j in range(i_in, n):
         hi, lo, cl = float(high[j]), float(low[j]), float(close[j])
         if lado > 0 and lo <= stop:
             exit_px = stop * (1 - H.SLIP_STOP); break
         if lado < 0 and hi >= stop:
             exit_px = stop * (1 + H.SLIP_STOP); break
-        if lado > 0 and hi >= obj:
+        if obj_valido and lado > 0 and hi >= obj:
             exit_px = obj * (1 - H.SLIP); break
-        if lado < 0 and lo <= obj:
+        if obj_valido and lado < 0 and lo <= obj:
             exit_px = obj * (1 + H.SLIP); break
         if j == n - 1:
             exit_px = cl * (1 - H.SLIP * lado); break
     R = lado * (exit_px - entry) / rdist
     if lado < 0:
         R -= (H.BORROW_CORTO * entry) / rdist
-    out["objVWAP"] = R
+    out["objGapFill"] = R
     # modo EOD (solo stop o cierre)
     exit_px = float(close[n - 1])
     for j in range(i_in, n):
@@ -83,7 +87,7 @@ def _sim(close, high, low, vwap, i_in, lado, stop):
 
 def run(umbral=0.03, tickers=35, dias=15, meses=20, seeds=(42, 7, 123), cm=None):
     cm = cm or H.cliente()
-    modos = ["objVWAP", "EOD"]
+    modos = ["objGapFill", "EOD"]
     por_seed = {}
     for seed in seeds:
         pares = H.muestrear(seed, clase="CS", n_tickers=tickers, n_dias=dias, meses=meses, cm=cm)
@@ -116,7 +120,6 @@ def run(umbral=0.03, tickers=35, dias=15, meses=20, seeds=(42, 7, 123), cm=None)
                 if abs(gap) < umbral:
                     continue
                 n_gap += 1
-                vwap = H.vwap_sesion(df)
                 or_hi, or_lo = float(high[0]), float(low[0])
                 if gap > 0:                       # gap up -> fade corto al girar a la baja
                     lado, i_in, stop = -1, None, None
@@ -134,7 +137,7 @@ def run(umbral=0.03, tickers=35, dias=15, meses=20, seeds=(42, 7, 123), cm=None)
                             i_in = j; stop = run_lo; break
                 if i_in is None:
                     continue
-                r = _sim(close, high, low, vwap, i_in, lado, stop)
+                r = _sim(close, high, low, prev_close, i_in, lado, stop)
                 if r:
                     for m in modos:
                         res[m].append({"R": r[m]})

@@ -34,8 +34,12 @@ ETFS_LIQUIDOS = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLY",
                  "XLP", "XLI", "XLU", "XLB", "XLRE", "GLD", "SLV", "TLT", "SMH"]
 
 
-def cliente(pausa=PAUSA):
-    """Cliente Massive con cache larga (reutiliza datos/cache de la infra existente)."""
+def cliente(pausa=None):
+    """Cliente Massive con cache larga (reutiliza datos/cache de la infra existente).
+    La pausa entre peticiones se puede bajar via env MASSIVE_PAUSA (Starter = ilimitado;
+    util en re-corridas con todo cacheado)."""
+    if pausa is None:
+        pausa = float(__import__("os").environ.get("MASSIVE_PAUSA", PAUSA))
     cm = massive.ClienteMassive.__new__(massive.ClienteMassive)
     cm.cli = Cliente(cache_dir="datos/cache", ttl=30 * 24 * 3600, reintentos=5,
                      pausa=2.0, timeout=90)
