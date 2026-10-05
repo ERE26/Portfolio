@@ -73,4 +73,66 @@ PIT de acciones comunes in-play (mega-caps excluidas).
   ORB largo: no era una cuestión de dirección, era que **no hay edge de ruptura** una vez
   quitada la supervivencia.
 
-<!-- SIGUIENTES SECCIONES: gap-fade, mean-reversion ETF/large-cap, time-of-day -->
+---
+
+## Estrategia 2 — GAP-FADE de gaps grandes de acción · `backtest_gapfade_massive.py`
+
+En gaps de apertura grandes (|open/cierre_previo − 1| > umbral) se **fadea** con pequeña
+confirmación de giro:
+- gap UP → **corto** cuando una vela cierra por debajo del mínimo de la 1ª vela (giro bajo).
+- gap DOWN → **largo** cuando una vela cierra por encima del máximo de la 1ª vela.
+
+Stop = extremo del día hasta la entrada. Dos salidas: **objGapFill** (cierra al rellenar
+el hueco = tocar el cierre previo, si el objetivo queda en el lado rentable; si no, EOD) y
+**EOD** (aguanta al cierre). El cierre previo se toma del GROUPED ajustado del día anterior
+(sin falsos gaps por splits). Universo PIT de acciones. Coste de borrow en cortos.
+
+**Muestra**: 30 tickers × 15 días × 20 meses; los gaps grandes son **raros** en nombres
+líquidos (mega-caps excluidas), de ahí las muestras pequeñas.
+
+### Umbral >3%
+
+| modo | semilla | ops | acierto | expectancy (R) | IC95 | PF | veredicto |
+|---|---|---:|---:|---:|---|---:|---|
+| objGapFill | 42 | 16 | 75% | +0.200 | [-0.155, +0.544] | 1.96 | sin edge |
+| objGapFill | 7 | 10 | 80% | +0.111 | [-0.222, +0.411] | 1.79 | sin edge |
+| objGapFill | 123 | 23 | 70% | +0.242 | [-0.100, +0.605] | 1.91 | sin edge |
+| objGapFill | **pooled** | 49 | 73% | **+0.201** | [-0.013, +0.420] | 1.91 | sin edge |
+| EOD | 42 | 16 | 75% | +0.375 | [-0.055, +0.796] | 2.80 | sin edge |
+| EOD | 7 | 10 | 60% | +0.009 | [-0.437, +0.458] | 1.03 | sin edge |
+| EOD | 123 | 23 | 70% | +0.456 | [+0.027, +0.914] | 2.71 | EDGE+ |
+| EOD | **pooled** | 49 | 69% | **+0.338** | [+0.074, +0.615] | 2.33 | EDGE+ |
+
+A >3% **todas las semillas dan expectancy positiva** y acierto alto (69–73%), y el *pooled*
+de ambas salidas es positivo (EOD con IC95 que excluye el 0). **Pero** cada semilla tiene
+10–23 ops: por debajo del mínimo de 20 para el veredicto de robustez. Sugerente, no probado.
+
+### Umbral >2% (más eventos, más potencia)
+
+| modo | semilla | ops | acierto | expectancy (R) | IC95 | PF | veredicto |
+|---|---|---:|---:|---:|---|---:|---|
+| objGapFill | 42 | 38 | 58% | -0.092 | [-0.330, +0.138] | 0.74 | sin edge |
+| objGapFill | 7 | 19 | 74% | +0.108 | [-0.200, +0.415] | 1.50 | sin edge |
+| objGapFill | 123 | 54 | 67% | +0.145 | [-0.053, +0.357] | 1.61 | sin edge |
+| objGapFill | **pooled** | 111 | 65% | **+0.057** | [-0.080, +0.201] | 1.21 | sin edge |
+| EOD | 42 | 38 | 53% | +0.078 | [-0.237, +0.406] | 1.21 | sin edge |
+| EOD | 7 | 19 | 53% | +0.011 | [-0.405, +0.493] | 1.03 | sin edge |
+| EOD | 123 | 54 | 57% | +0.207 | [-0.031, +0.475] | 1.72 | sin edge |
+| EOD | **pooled** | 111 | 55% | **+0.129** | [-0.046, +0.317] | 1.39 | sin edge |
+
+Al bajar a >2% (duplica la muestra), el *edge* **se diluye**: la expectancy *pooled* cae de
++0,34→+0,13 R (EOD) y +0,20→+0,06 R (objGapFill), **una semilla se vuelve negativa**, y
+ningún IC95 excluye el 0. Clásico de muestra pequeña: lo "bonito" del >3% era el extremo
+poco poblado.
+
+**Veredicto Estrategia 2: NO hay edge robusto, pero hay una señal sugerente honesta.**
+- El gap-fade de acciones tiene el perfil típico de reversión: **acierto alto** (55–73%),
+  PF > 1 casi siempre, expectancy positiva en el *pooled* de las dos salidas y umbrales.
+- No pasa el listón de robustez: a >3% las muestras son demasiado pequeñas (10–23 ops/semilla)
+  y a >2% el *edge* se encoge hacia cero y una semilla se vuelve negativa. El IC95>0 **no se
+  da en las 3 semillas** en ninguna configuración.
+- Lectura honesta: es el ángulo **menos muerto** de los tres de entrada/salida direccional.
+  Merecería re-testearse con más historia o un universo algo menos líquido (que gapea más)
+  para ver si el lean positivo es real; con los datos de aquí es **sugerente pero no probado**.
+
+<!-- SIGUIENTES SECCIONES: mean-reversion ETF/large-cap, time-of-day -->
