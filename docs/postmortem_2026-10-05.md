@@ -28,9 +28,13 @@ del libro, neto, PERDIÓ ~−$1.150 hoy.** Sin esa única posición, hoy habría
    aplanara TSMOM.
 
 ## Qué NO funcionó (y la lección para mañana)
-1. **ORB resto: 3/4 perdedoras.** PAGS/THRM eran rupturas ya EXTENDIDAS cuando entramos → se
-   giraron. **Lección:** añadir un filtro anti-chase — saltar la ruptura si el precio de entrada
-   ya está muy por encima del máximo del rango (la corredora ya corrió). Calidad > cantidad.
+1. **ORB resto: 3/4 perdedoras, −$251.** PRIMERA hipótesis (plausible): "entramos rupturas ya
+   extendidas". **REFUTADA por los datos**: la extensión de la entrada sobre el máximo del rango
+   fue PAGS +0,2% (perdió −232, la peor), PAX +0,4% (ganó +72), THRM +1,6% (−86), XP +1,9% (−6).
+   **No hay relación extensión↔resultado**; el mayor perdedor fue la ruptura MENOS extendida.
+   **Lección real:** NO añadir un "filtro anti-chase" — sería overfitting a 4 trades. Las
+   perdedoras del ORB son el BASE RATE de una estrategia sin edge (las rupturas fallan), no un
+   patrón corregible con una regla ajustada a un día. La disciplina es NO sobre-ajustar al ruido.
 2. **SCALP: −0,25%/op en 36 ops.** Confirma el veredicto 8/8. **Lección:** PAUSAR el scalp, cero
    size extra; ya no aporta información nueva.
 3. **FADE: 6/11 rechazadas por HTB.** **Lección:** pre-filtrar shortabilidad y no malgastar
@@ -40,8 +44,10 @@ del libro, neto, PERDIÓ ~−$1.150 hoy.** Sin esa única posición, hoy habría
    (pendiente OK de Eduardo).
 
 ## Decisiones concretas para mañana (perfeccionar el intradía = contener y seleccionar)
-- **ORB:** añadir filtro de extensión (no perseguir rupturas ya corridas) + subir la vara de
-  RVOL/calidad. Mantener TP 2R, tope 12%, breakeven. Dejar correr la corredora cuando aparezca.
+- **ORB:** NO añadir filtros ajustados a 4 trades (el anti-chase quedó refutado por los datos).
+  Mantener lo estructural que SÍ funcionó: TP 2R, tope 12%, breakeven, OCO protegido. Dejar correr
+  la corredora cuando aparezca (es donde vive la única expectativa positiva). Cualquier cambio de
+  entrada se valida con backtest survivorship-free, nunca con el P&L de un día.
 - **SCALP:** pausar (veredicto cerrado).
 - **FADE:** saltar nombres HTB conocidos de entrada.
 - **Overnight QQQ:** arreglar la ejecución (market cerca del cierre) — es el EV real.
