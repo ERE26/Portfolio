@@ -73,6 +73,34 @@ def historico(ticker, intervalo="1Hour", desde="2020-08-01", hasta=None, feed="i
     return df[COLUMNAS]
 
 
+def diario(ticker, desde="2023-01-01", hasta=None, feed="iex", kid=None, sec=None, cliente=None):
+    """Barras DIARIAS (1Day) de un valor, SIN filtrar por horario (las usa, p.ej., el SMA200
+    del libro overnight). Devuelve OHLCV indexado por fecha (naive), ajustado por splits/div."""
+    kid, sec = _claves(kid, sec)
+    cli = cliente or Cliente(ttl=12 * 3600)
+    h = {"APCA-API-KEY-ID": kid, "APCA-API-SECRET-KEY": sec}
+    hasta = hasta or pd.Timestamp.now().strftime("%Y-%m-%d")
+    filas, token, paginas = [], None, 0
+    while paginas < 20:
+        params = {"timeframe": "1Day", "start": desde, "end": hasta, "feed": feed,
+                  "limit": 10000, "adjustment": "all"}
+        if token:
+            params["page_token"] = token
+        d = cli.get_json(f"{BASE}/{ticker}/bars", params=params, headers=h, cache=(token is None))
+        filas.extend(d.get("bars", []))
+        token = d.get("next_page_token")
+        paginas += 1
+        if not token:
+            break
+        time.sleep(0.05)
+    if not filas:
+        raise RuntimeError(f"Alpaca sin datos diarios para {ticker}")
+    df = pd.DataFrame(filas)
+    df["fecha"] = pd.to_datetime(df["t"]).dt.tz_convert("America/New_York").dt.tz_localize(None).dt.normalize()
+    df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
+    return df.set_index("fecha").sort_index()[COLUMNAS]
+
+
 def descargar_universo(tickers, intervalo="1Hour", desde="2020-08-01", carpeta="datos/intraday",
                        feed="iex", pausa=0.3, verbose=True, minimo=200):
     """Descarga barras intradia del universo y guarda un CSV por ticker."""

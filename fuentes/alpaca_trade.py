@@ -113,11 +113,14 @@ def precio_actual(tickers):
     return {k: v["p"] for k, v in r.json().get("trades", {}).items()}
 
 
-def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market", libro=None):
+def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market", libro=None, tif="day"):
     """Envia UNA orden a la cuenta paper. Requiere confirmar=True (salvaguarda).
 
     qty: numero de acciones (entero, >0). lado: 'buy' o 'sell'.
-    libro: etiqueta del libro que origina la orden ('intradia'|'swing'|'tsmom'...).
+    tif: time_in_force. 'day' (defecto); 'cls' = market-on-close (MOC); 'opg' =
+      market-on-open (MOO). El libro overnight usa 'cls' para entrar al cierre y 'opg'
+      para salir en la apertura (captura la prima nocturna close->open).
+    libro: etiqueta del libro que origina la orden ('intradia'|'swing'|'overnight'...).
       Se graba en el client_order_id ('<libro>-<id>'), lo que permite ATRIBUIR cada
       posicion/operacion a su libro despues (capa de riesgo por libro). No altera la
       ejecucion; solo anota la autoria.
@@ -127,7 +130,7 @@ def enviar_orden(ticker, qty, lado, confirmar=False, tipo="market", libro=None):
     if qty <= 0 or lado not in ("buy", "sell"):
         return {"omitida": True, "ticker": ticker, "qty": qty, "lado": lado}
     cuerpo = {"symbol": ticker, "qty": str(qty), "side": lado,
-              "type": tipo, "time_in_force": "day"}
+              "type": tipo, "time_in_force": tif}
     if libro:
         cuerpo["client_order_id"] = f"{libro}-{uuid.uuid4().hex[:16]}"
     if not confirmar:
