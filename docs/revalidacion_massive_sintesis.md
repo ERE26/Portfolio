@@ -91,3 +91,19 @@ pregunta: no es que nos falte la idea; es que ese dinero se cobra siendo el crea
    multi-libro, NO por retorno esperado sobre SPY.
 4. **Lección de cartera:** gran parte del valor de este ejercicio ha sido NEGATIVO —saber qué
    NO funciona— y eso vale tanto como encontrar un ganador: evita arriesgar capital en humo.
+## Actualización — overlays sobre el superviviente (overnight QQQ, survivorship-free)
+
+Se intentó **mejorar** el único superviviente con overlays (saltar noches malas o
+escalar las buenas), survivorship-free y validados OOS: régimen de VIX (proxy
+VIXY/VIXM + vol realizada, **sin FRED en el entorno**), estacionalidad (día de la
+semana, turn-of-month, pre/post-FOMC), tendencia/breadth de corto plazo, blackout de
+FOMC y vol-targeting. Walk-forward, IC95 bootstrap, **DSR con corrección por nº de
+pruebas** (27 por activo / 81 en cesta QQQ-SPY-IWM) y PBO/CSCV.
+
+| Estudio | Hallazgo | Sharpe (coste) | IC95 | DSR (N pruebas) | ¿Sobrevive? | Doc |
+|---|---|---|---|---|---|---|
+| **Overlays overnight QQQ** (sobre cierre>SMA200) | Ningún overlay bate el baseline tras DSR. Mejor candidato = **evitar turn-of-month** (contradice el efecto TOM clásico → probable artefacto 2022). Tendencia/breadth y blackout FOMC **empeoran**. Hallazgo real: fragilidad a coste y edge casi exclusivo de QQQ (SPY 0,66 / IWM 0,53). | baseline 1,15 @2bps (1,55 @0bps; **0,55 @5bps**); mejor overlay 1,73 @2bps | baseline [0,34, 1,97] | mejor overlay **0,885-0,934** (N=27/81); baseline 0,515 | **No** — nada llega a 0,95 | [overnight_overlays_resultado.md](overnight_overlays_resultado.md) |
+
+**Implicación operativa:** no cablear ningún overlay en `operativa_overnight.py`;
+mantener el baseline puro. La prioridad sigue siendo **medir el slippage MOC/MOO real
+en paper** — el baseline pasa de Sharpe 1,55 a 0,55 entre 0 y 5 bps.
