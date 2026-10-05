@@ -19,7 +19,9 @@ from .http import Cliente
 
 BASE = "https://api.massive.com"
 COLUMNAS = ["open", "high", "low", "close", "volume"]
-PAUSA_MIN = 12.5  # s entre peticiones: 60/5 req/min + margen
+PAUSA_MIN = 12.5  # s entre peticiones: plan gratis = 5 req/min + margen
+PAUSA_STARTER = 0.3  # plan Starter: sin limite de 5/min (verificado en vivo)
+NY = "America/New_York"
 
 
 def _claves(k=None):

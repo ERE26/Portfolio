@@ -242,6 +242,49 @@ def validar_survivorship(fecha_antigua, n=150, cm=None, sesion_reciente=None):
     }
 
 
+def formar(desde, hasta, top=100, cm=None, verbose=True, presencia_min=0.70):
+    """Universo PIT por VENTANA (para backtests que ademas necesitan los cierres
+    diarios de la ventana de formacion, p.ej. para estimar beta vs SPY sin
+    look-ahead). Reusa grouped_asof (cacheado en parquet) y set_common_stocks de
+    este mismo modulo. Devuelve (tickers, cierres_df [fechas x tickers], ranking).
+
+    Se diferencia de universo_asof (que da un corte as-of de UNA fecha) en que
+    agrega una ventana [desde, hasta] y devuelve la matriz de cierres. Mismo
+    espiritu point-in-time: solo usa datos de la ventana de formacion."""
+    cm = _cliente(cm)
+    cs_set, _ = set_common_stocks(cm=cm)
+    dias = [d.strftime("%Y-%m-%d") for d in pd.bdate_range(desde, hasta)]
+    cierres, dvols, n_ok = {}, {}, 0
+    for d in dias:
+        g = grouped_asof(d, cm=cm)        # [ticker, close, volume, dollar_vol]
+        if g.empty:
+            continue
+        n_ok += 1
+        gi = g.set_index("ticker")
+        cierres[d] = gi["close"]
+        dvols[d] = gi["dollar_vol"]
+    if n_ok == 0:
+        raise RuntimeError("grouped no devolvio ningun dia de formacion")
+    cierres_df = pd.DataFrame(cierres)        # index=ticker, cols=fechas
+    dvol_df = pd.DataFrame(dvols)
+    presencia = dvol_df.notna().mean(axis=1)
+    dvol_med = dvol_df.mean(axis=1).where(presencia >= presencia_min)
+    px_med = cierres_df.mean(axis=1)
+    es_cs = pd.Series(dvol_med.index.isin(cs_set), index=dvol_med.index)
+    elegibles = dvol_med[(px_med >= 3.0) & (px_med <= 2000.0) & es_cs & dvol_med.notna()]
+    ranking = elegibles.sort_values(ascending=False)
+    tickers = list(ranking.index[:top])
+    if verbose:
+        print(f"[universo_pit.formar] {n_ok} dias de formacion | {len(ranking)} "
+              f"elegibles -> top {len(tickers)} por dolar-volumen as-of")
+        if len(ranking):
+            print(f"   dvol top1 {ranking.iloc[0]/1e6:.0f}M$  "
+                  f"topK {ranking.iloc[min(len(tickers), top)-1]/1e6:.0f}M$")
+    cierres_sel = cierres_df.loc[tickers].T   # fechas x tickers
+    cierres_sel.index = pd.to_datetime(cierres_sel.index)
+    return tickers, cierres_sel.sort_index(), ranking[:top]
+
+
 if __name__ == "__main__":
     import argparse
     import json
