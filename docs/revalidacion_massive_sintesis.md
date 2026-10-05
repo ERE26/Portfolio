@@ -61,6 +61,9 @@ la validación honesta: la mayoría de ideas no sobreviven, y el superviviente e
 | Vol-compresión → expansión | baseline −0,03R (no robusto); NR7/apertura-tight **empeoran** (−0,10/−0,12R, IC95<0) | ❌ pierde | la compresión precede chop/head-fake, no expansión |
 | **Stat-arb cross-sectional** (estilo fondo, 100 nombres, dólar/beta-neutral) | bruto Sharpe +20 a 5-min (¡señal de artefacto!); **test de retardo 5min → el edge DESAPARECE** (de +1,14 a −0,31 bps); TAKER −3,9 bps (desastre) | ❌ **no es alfa, es el spread bid-ask** | el "edge" era rebote bid-ask; solo lo cobra quien PROVEE liquidez (market-maker) |
 | Pairs en CESTA (acciones, maker + diversificación) | bruto ni significativo (+0,017 bps, IC95 cruza 0); TAKER pierde; MAKER +0,03 bps no signif. | ❌ | sin señal real tras netear |
+| **Low-float runners — gap-and-go** (universo del day-trader retail, PIT) | −0,07/−0,12R @25bps (IC95 cruza 0); muere a 50bps | ❌ | ejecución (spread) |
+| **Low-float runners — ORB runner** | −0,19/+0,05R (IC95 cruza 0, inconsistente entre ventanas); muere a 50-100bps | ❌ | ruido + ejecución |
+| **Low-float runners — short parabólico** | −0,77/−0,32R, **PIERDE siempre** (~80% stops); borrow caro/HTB | ❌ | el runner te arrolla |
 
 **Matiz clave del pairs/stat-arb:** es el **único intradía con señal bruta real y robusta**
 de todo el estudio (reversión genuina del spread de ETFs emparejados). Pero su break-even está
