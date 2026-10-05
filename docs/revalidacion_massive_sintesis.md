@@ -1,0 +1,59 @@
+# Síntesis maestra: re-validación de TODO el sistema con datos limpios (Massive)
+
+**Fecha:** 2026-10-05 · **Datos:** Massive Starter (minuto + EOD, 5 años, deslistados,
+endpoint grouped) · **Solo research/paper.** Re-validación completa tras pagar el plan $29,
+sobre universo **point-in-time sin sesgo de supervivencia**. Honestidad > resultado bonito.
+
+## Tabla maestra — SESGADO vs LIMPIO
+
+| Estrategia | Sesgado (antes) | **Limpio (Massive)** | ¿Edge robusto? | Causa de muerte |
+|---|---|---|---|---|
+| **ORB stock 5-min** (confirmado, EOD) | +0,26R | **−0,069R** | ❌ | supervivencia (haircut +0,33R) |
+| ORB stock 1-min | +0,26R | −0,110R | ❌ | supervivencia + ruido |
+| **ORB de índice** (SPY/QQQ/IWM) | — | SPY −0,083R (IC95<0) | ❌ **pierde** | el ORB era selección de acciones, no ruptura de mercado |
+| Momentum genérico 15m | −0,3R | (ya muerto) | ❌ | sin edge |
+| Pullback a VWAP | muerto | (ya muerto) | ❌ | sin edge |
+| Mean-reversion a VWAP (in-play) | pierde | (ya muerto) | ❌ | navaja cayendo |
+| **Lado corto** (breakdown) | — | sin edge; trailing pierde | ❌ | sin edge |
+| Gap-fade en ETF | — | no robusto | ❌ | espejismo de muestra |
+| Momentum última hora | — | Sharpe negativo | ❌ | ruido |
+| Meta-ML (López de Prado) | sin lift | (base muerta → moot) | ❌ | nada que etiquetar |
+| Filtro de régimen (HMM/Hurst/SPY) | sin lift | (base muerta → moot) | ❌ | sin lift |
+| **TSMOM** (ETF cross-asset) | Sharpe ~1,1 | 1,13 (sin superv.) | ⚠️ no bate SPY (1,32) | diversificador, no alfa |
+| **Rotación Europa** (ETF país) | — | 1,15 vs SPY 1,07 | ⚠️ empate = beta €+divisa | no alfa |
+| **Residual momentum** long-only | Sharpe 1,83 / CAGR 64% | **1,45 / 28%** < SPY 1,77 | ❌ | supervivencia (haircut −36 pts CAGR) |
+| Overnight **broad-stock** (equal-w, churn diario) | — | bruto +6,6%/año PERO neto<0, < SPY | ❌ | comisiones del cruce diario |
+| **Overnight QQQ + tendencia (SMA200)** | — | **Sharpe 1,30, IC95 [0,25,2,43], train≈test** | ✅ **candidato** | — (a validar ejecución en paper) |
+
+## El patrón honesto
+Casi todo nuestro "edge" era **sesgo de supervivencia** (ORB stock, residual momentum) o **no
+sobrevive a los costes** (overnight broad-stock) o simplemente **no existía** (momentum,
+pullback, mean-rev, última hora, gap-fade, lado corto, ORB índice). Es el resultado típico de
+la validación honesta: la mayoría de ideas no sobreviven, y el superviviente es simple.
+
+## El ÚNICO superviviente: overnight de QQQ + filtro de tendencia
+- Mantener QQQ solo de noche (MOC→MOO) y solo si cierre>SMA200. Sharpe 1,30 vs 0,70 B&H,
+  maxDD −9,6% (vs −35% de QQQ en 2022), IC95 del Sharpe excluye 0 (el único de todo el
+  estudio), consistente OOS (train 1,29 / test 1,31), tolerante a coste hasta ~1,5 bp/lado.
+- **Matiz honesto (del estudio overnight sobre acciones):** la prima nocturna del MERCADO la
+  capturas con solo mantener SPY (overnight de SPY ≈ +6,4%/año con 1 trade). La ventaja del
+  QQQ+tendencia no es alfa pura: es **menos exposición y menos drawdown** (fuera en noches
+  bajistas) sobre un instrumento **líquido y barato de ejecutar** (por eso sobrevive al coste
+  donde la cesta de 3.000 acciones no). Su viabilidad real depende del **slippage de las
+  subastas MOC/MOO**, que es justo lo que mide el paper.
+
+## Qué se ha hecho y qué queda
+- ✅ **Overnight QQQ → PAPER** (`operativa_overnight.py`, triggers diarios MOC/MOO, tamaño de
+  medición, sin tocar TSMOM) para medir el slippage real. Es el muro que decide.
+- ⏳ **Intradía ronda 2** (pairs/stat-arb, vol-compresión, MR large-cap) en marcha — por si
+  queda algún intradía real sin explorar. (Se añadirá a esta tabla.)
+- ❌ Descartado para cablear: todo lo demás.
+
+## Recomendación honesta
+1. **Dejar correr el paper del overnight QQQ** ~2-4 semanas y mirar el slippage MOC/MOO real.
+   Si ≤~1 bp/lado → edge confirmado operable; si >1,5 bp → se cae como la cesta de acciones.
+2. **No cablear nada intradía** hoy: no hay edge intradía robusto en limpio.
+3. **TSMOM/rotación**: mantener solo como diversificadores de drawdown dentro de la cartera
+   multi-libro, NO por retorno esperado sobre SPY.
+4. **Lección de cartera:** gran parte del valor de este ejercicio ha sido NEGATIVO —saber qué
+   NO funciona— y eso vale tanto como encontrar un ganador: evita arriesgar capital en humo.
