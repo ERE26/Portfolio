@@ -45,9 +45,9 @@ la validación honesta: la mayoría de ideas no sobreviven, y el superviviente e
 ## Qué se ha hecho y qué queda
 - ✅ **Overnight QQQ → PAPER** (`operativa_overnight.py`, triggers diarios MOC/MOO, tamaño de
   medición, sin tocar TSMOM) para medir el slippage real. Es el muro que decide.
-- ⏳ **Intradía ronda 2** (pairs/stat-arb, vol-compresión, MR large-cap) en marcha — por si
-  queda algún intradía real sin explorar. (Se añadirá a esta tabla.)
-- ❌ Descartado para cablear: todo lo demás.
+- ✅ **Campaña intradía CERRADA**: pairs/stat-arb, vol-compresión, MR large-cap y el resto, todas
+  medidas en limpio (ver tabla abajo). Ninguna da edge robusto neto de costes.
+- ❌ Descartado para cablear: todo lo intradía. Único vivo: overnight QQQ (en paper).
 
 ## Actualización — más familias intradía (rondas nuevas, todas en limpio)
 
@@ -58,7 +58,7 @@ la validación honesta: la mayoría de ideas no sobreviven, y el superviviente e
 | Mean-reversion VWAP (ETF + large-cap) | **−0,37R, IC95<0, 2 lados × 3 semillas** | ❌ pierde | la extensión continúa, no revierte |
 | Time-of-day (patrón horario) | solo continuación débil última hora (+7,5 bps bruto, 2/3) | ❌ | no robusto / neto≈0 |
 | **Pairs / stat-arb ETFs** (market-neutral) | **bruto +1,5 bp/op, 62% acierto, ROBUSTO (IC95>0 ×3)** → neto a 4bp/pata −6,5 bp | ❌ **sub-coste** | arbitrado por debajo del coste de ejecución |
-| Vol-compresión → expansión | (pendiente) | — | — |
+| Vol-compresión → expansión | baseline −0,03R (no robusto); NR7/apertura-tight **empeoran** (−0,10/−0,12R, IC95<0) | ❌ pierde | la compresión precede chop/head-fake, no expansión |
 
 **Matiz clave del pairs/stat-arb:** es el **único intradía con señal bruta real y robusta**
 de todo el estudio (reversión genuina del spread de ETFs emparejados). Pero su break-even está
