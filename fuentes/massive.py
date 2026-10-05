@@ -89,7 +89,7 @@ _TF_MIN = {"1Min": 1, "5Min": 5, "15Min": 15, "1min": 1, "5min": 5, "15min": 15}
 
 
 def barras_intradia(ticker, tf, desde, hasta, ajustado=True, cm=None,
-                    solo_regular=True, max_paginas=200, cache=True):
+                    solo_regular=True, max_paginas=200, cache=True, incluir_vwap=False):
     """OHLCV intradia (barras de minuto agregadas) para un valor, con PAGINACION.
 
     tf: '5Min' -> 5, '1Min' -> 1 (tambien '15Min'). El endpoint es
@@ -98,6 +98,10 @@ def barras_intradia(ticker, tf, desde, hasta, ajustado=True, cm=None,
     convertido UTC->America/New_York y tz-naive; por defecto se FILTRA a horario
     regular 09:30-16:00 (Massive sirve tambien premarket/afterhours). Columnas
     open, high, low, close, volume. Mismo estilo defensivo que barras_diarias.
+
+    incluir_vwap=True -> anade las columnas 'vwap' (vw de cada barra) y 'trades'
+    (n), utiles para VWAP de sesion. Retrocompatible: por defecto no se anaden y
+    los llamadores existentes no ven cambio alguno.
     """
     mult = _TF_MIN.get(tf)
     if mult is None:
@@ -112,14 +116,18 @@ def barras_intradia(ticker, tf, desde, hasta, ajustado=True, cm=None,
         if not nxt or i == max_paginas - 1:
             break
         d = cm.get(nxt, cache=cache)  # next_url ya trae el cursor; la clave va en la cabecera
+    cols = COLUMNAS + (["vwap", "trades"] if incluir_vwap else [])
     if not filas:
-        return pd.DataFrame(columns=COLUMNAS)
+        return pd.DataFrame(columns=cols)
     df = pd.DataFrame(filas)
     idx = (pd.to_datetime(df["t"], unit="ms", utc=True)
            .dt.tz_convert("America/New_York").dt.tz_localize(None))
-    out = pd.DataFrame({"open": df["o"].values, "high": df["h"].values,
-                        "low": df["l"].values, "close": df["c"].values,
-                        "volume": df["v"].values}, index=pd.DatetimeIndex(idx, name="fecha"))
+    datos = {"open": df["o"].values, "high": df["h"].values,
+             "low": df["l"].values, "close": df["c"].values, "volume": df["v"].values}
+    if incluir_vwap:
+        datos["vwap"] = df.get("vw", pd.Series(index=df.index)).values
+        datos["trades"] = df.get("n", pd.Series(index=df.index)).values
+    out = pd.DataFrame(datos, index=pd.DatetimeIndex(idx, name="fecha"))
     out = out[~out.index.duplicated(keep="last")].sort_index()
     if solo_regular:
         t = out.index.time
@@ -128,23 +136,30 @@ def barras_intradia(ticker, tf, desde, hasta, ajustado=True, cm=None,
     return out
 
 
-def grouped_diario(fecha, ajustado=True, cm=None):
+def grouped_diario(fecha, ajustado=True, cm=None, incluir_vwap=False):
     """TODAS las acciones US de un dia (1 llamada). Incluye los que ESE dia
     cotizaban aunque hoy esten deslistados -> base para universo point-in-time
     sin sesgo de supervivencia. GET /v2/aggs/grouped/locale/us/market/stocks/{d}.
     Devuelve DataFrame con ticker, open, high, low, close, volume (vacio si el
     plan no lo incluye o la fecha no es sesion). Lanza si la API devuelve error.
+
+    incluir_vwap=True -> anade columnas 'vwap' y 'trades'. Retrocompatible.
     """
     cm = cm or ClienteMassive()
     d = cm.get(f"/v2/aggs/grouped/locale/us/market/stocks/{fecha}",
                {"adjusted": str(ajustado).lower()})
     res = d.get("results") or []
+    cols = ["ticker"] + COLUMNAS + (["vwap", "trades"] if incluir_vwap else [])
     if not res:
-        return pd.DataFrame(columns=["ticker"] + COLUMNAS)
+        return pd.DataFrame(columns=cols)
     df = pd.DataFrame(res)
-    return pd.DataFrame({"ticker": df["T"].values, "open": df["o"].values,
-                         "high": df["h"].values, "low": df["l"].values,
-                         "close": df["c"].values, "volume": df["v"].values})
+    datos = {"ticker": df["T"].values, "open": df["o"].values,
+             "high": df["h"].values, "low": df["l"].values,
+             "close": df["c"].values, "volume": df["v"].values}
+    if incluir_vwap:
+        datos["vwap"] = df.get("vw", pd.Series(index=df.index)).values
+        datos["trades"] = df.get("n", pd.Series(index=df.index)).values
+    return pd.DataFrame(datos)
 
 
 def tickers_referencia(activos=True, paginas=1, limite=1000, cm=None, **filtros):
