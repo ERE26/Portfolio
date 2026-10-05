@@ -49,6 +49,24 @@ la validación honesta: la mayoría de ideas no sobreviven, y el superviviente e
   queda algún intradía real sin explorar. (Se añadirá a esta tabla.)
 - ❌ Descartado para cablear: todo lo demás.
 
+## Actualización — más familias intradía (rondas nuevas, todas en limpio)
+
+| Familia intradía | Resultado limpio | ¿Edge robusto? | Muere por |
+|---|---|---|---|
+| Lado corto (breakdown) | EOD −0,09R (IC95 cruza 0); trailing pierde | ❌ | no hay señal |
+| Gap-fade acciones (>2-3%) | acierto alto pero gaps raros → sin muestra | ⚠️ sugerente, infra-potenciado | falta de muestra |
+| Mean-reversion VWAP (ETF + large-cap) | **−0,37R, IC95<0, 2 lados × 3 semillas** | ❌ pierde | la extensión continúa, no revierte |
+| Time-of-day (patrón horario) | solo continuación débil última hora (+7,5 bps bruto, 2/3) | ❌ | no robusto / neto≈0 |
+| **Pairs / stat-arb ETFs** (market-neutral) | **bruto +1,5 bp/op, 62% acierto, ROBUSTO (IC95>0 ×3)** → neto a 4bp/pata −6,5 bp | ❌ **sub-coste** | arbitrado por debajo del coste de ejecución |
+| Vol-compresión → expansión | (pendiente) | — | — |
+
+**Matiz clave del pairs/stat-arb:** es el **único intradía con señal bruta real y robusta**
+de todo el estudio (reversión genuina del spread de ETFs emparejados). Pero su break-even está
+en ~1 bp/pata/lado y ejecutar 4 fills en ETFs líquidos cuesta más → **neto negativo**. Es el
+resultado de libro: la anomalía de pares en instrumentos muy líquidos **ya está arbitrada hasta
+por debajo del coste**. Hay señal; no hay margen tras costes. (Distinto del ORB, que moría por
+supervivencia, y del resto, que no tenía señal.)
+
 ## Recomendación honesta
 1. **Dejar correr el paper del overnight QQQ** ~2-4 semanas y mirar el slippage MOC/MOO real.
    Si ≤~1 bp/lado → edge confirmado operable; si >1,5 bp → se cae como la cesta de acciones.
