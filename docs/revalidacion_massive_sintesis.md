@@ -65,6 +65,7 @@ la validación honesta: la mayoría de ideas no sobreviven, y el superviviente e
 | **Low-float runners — gap-and-go** (universo del day-trader retail, PIT) | −0,07/−0,12R @25bps (IC95 cruza 0); muere a 50bps | ❌ | ejecución (spread) |
 | **Low-float runners — ORB runner** | −0,19/+0,05R (IC95 cruza 0, inconsistente entre ventanas); muere a 50-100bps | ❌ | ruido + ejecución |
 | **Low-float runners — short parabólico** | −0,77/−0,32R, **PIERDE siempre** (~80% stops); borrow caro/HTB | ❌ | el runner te arrolla |
+| **Low-float runners — SELECCIÓN** (meta-labeling + cortes, 2.802 runner-days PIT) | mejor subconjunto ORB +0,25R / gap-and-go +0,18R PERO **DSR ≤ 0,33, IC95 cruza 0 siempre, PBO 0,5–0,95** | ❌ | espejismo de cola (no sobrevive OOS/DSR/PBO) |
 | **Meta-modelo ENSEMBLE** (meta-labeling LdP: reversión + 15 features, 276k eventos, triple-barrera, purged WF) | TAKER nunca robusto (lag0 +14bps DSR0,84 sobre 0,12% eventos; lag1 +4bps DSR0,37 IC cruza 0). "Robusto" solo en MAKER, y **gross/evento +0,36→−0,02bps con entry_lag=1** | ❌ **rebote bid-ask** | mezclar señales débiles concentra el spread, no crea alfa (ver `ensemble_metamodel_resultado.md`) |
 
 **Matiz clave del pairs/stat-arb:** es el **único intradía con señal bruta real y robusta**
@@ -73,6 +74,15 @@ en ~1 bp/pata/lado y ejecutar 4 fills en ETFs líquidos cuesta más → **neto n
 resultado de libro: la anomalía de pares en instrumentos muy líquidos **ya está arbitrada hasta
 por debajo del coste**. Hay señal; no hay margen tras costes. (Distinto del ORB, que moría por
 supervivencia, y del resto, que no tenía señal.)
+
+**Matiz de la SELECCIÓN de runners** (`docs/runners_seleccion_resultado.md`): el baseline del
+runner no tenía edge *en media*, pero el day-trader **selecciona**. Se probó si un subconjunto
+—meta-modelo logística/HGB con purged walk-forward, o cortes simples— rescata expectancy neta > 0
+robusta OOS, sobre 2.802 runner-days PIT sin supervivencia y con el **mismo R** que el baseline.
+La selección empuja la media hacia 0 e incluso positiva en los cortes más estrechos, pero
+**ningún subconjunto sobrevive** (DSR ≤ 0,33 vs 0,95 exigido, IC95 OOS cruza 0 siempre, PBO alto):
+es el espejismo de cola, ahora cuantificado. Cierra la puerta que dejó abierta la sección 7 del
+doc de runners: **el edge no está en una selección aprendible con features de apertura.**
 
 **La respuesta definitiva a "cómo ganan los fondos intradía" (test estilo-fondo).** Se montó el
 stat-arb como lo hacen ellos (cross-sectional de 100 nombres, dólar/beta-neutral, + escenario de
