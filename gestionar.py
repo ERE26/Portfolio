@@ -510,8 +510,10 @@ def main(gestionar=False, rotar=False, reserva_por_pos=20000.0):
                 qty = int(por_pos / precio)
                 if qty <= 0:
                     continue
-                tp = round(precio * (1 + cfg["k_pt"] * s["atr_pct"]), 2)
-                sl = round(precio * (1 - cfg["k_sl"] * s["atr_pct"]), 2)
+                # TP/SL en ATR (R:R 2:1) pero ACOTADOS a banda intradía realista (ver
+                # AT.niveles_bracket): nada de objetivos del 12-15% en nombres de ATR alto.
+                tp, sl = AT.niveles_bracket(precio, cfg["k_sl"] * s["atr_pct"],
+                                            r_mult=cfg["k_pt"] / cfg["k_sl"], lado="buy")
                 try:
                     r = AT.enviar_bracket(s["ticker"], qty, tp, sl, confirmar=True, libro="intradia")
                     if r.get("id"):

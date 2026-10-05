@@ -78,8 +78,9 @@ def plan_intradia(reserva, intervalo="1Hour", n_max=5, tickers=LIQUIDOS, verbose
         qty = int(por_pos / s["precio"])
         if qty <= 0:
             continue
-        tp = s["precio"] * (1 + cfg["k_pt"] * s["atr_pct"])
-        sl = s["precio"] * (1 - cfg["k_sl"] * s["atr_pct"])
+        # TP/SL en ATR (R:R 2:1) ACOTADOS a banda intradía realista (AT.niveles_bracket).
+        tp, sl = AT.niveles_bracket(s["precio"], cfg["k_sl"] * s["atr_pct"],
+                                    r_mult=cfg["k_pt"] / cfg["k_sl"], lado="buy")
         ordenes.append({"ticker": s["ticker"], "qty": qty, "precio": s["precio"],
                         "tp": round(tp, 2), "sl": round(sl, 2),
                         "rvol": s["rvol"], "ret_sesion": s["ret_sesion"]})

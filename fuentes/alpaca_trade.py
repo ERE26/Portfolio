@@ -162,6 +162,34 @@ def historia_cuenta(period="3M", timeframe="1D"):
     return df[df["equity"] > 0]
 
 
+# --- Niveles de TP/SL realistas para intradia ---------------------------------------
+# Un take-profit intradia del 15-20% no es realista: casi nunca se toca y descuadra el
+# R-multiplo. Se ACOTA el stop a una banda sensata y el objetivo a un multiplo R del
+# riesgo acotado, con un techo absoluto. TODOS los libros intradia con bracket pasan por
+# aqui, para que ninguno ponga objetivos/stops absurdos en nombres muy volatiles.
+INTRADIA_SL_MAX = 0.03      # stop maximo 3% del precio
+INTRADIA_SL_MIN = 0.006     # stop minimo 0,6% (evita stops microscopicos por ruido)
+INTRADIA_TP_MAX = 0.08      # take-profit maximo 8%
+
+
+def niveles_bracket(precio, sl_dist_pct, r_mult=2.0, lado="buy"):
+    """(tp, sl) realistas para una entrada intradia a `precio`.
+
+    sl_dist_pct: distancia de stop deseada como fraccion del precio (0.02 = 2%). Se acota
+      a [INTRADIA_SL_MIN, INTRADIA_SL_MAX]. El objetivo es r_mult * riesgo_acotado, con tope
+      INTRADIA_TP_MAX. lado 'buy' -> TP arriba / SL abajo; 'sell' (corto) -> al reves.
+    Devuelve (tp, sl) ya redondeados a 2 decimales.
+    """
+    precio = float(precio)
+    sl_d = min(max(float(sl_dist_pct), INTRADIA_SL_MIN), INTRADIA_SL_MAX)
+    tp_d = min(float(r_mult) * sl_d, INTRADIA_TP_MAX)
+    if lado == "sell":
+        tp, sl = precio * (1 - tp_d), precio * (1 + sl_d)
+    else:
+        tp, sl = precio * (1 + tp_d), precio * (1 - sl_d)
+    return round(tp, 2), round(sl, 2)
+
+
 def enviar_bracket(ticker, qty, tp_price, sl_price, lado="buy", confirmar=False, libro=None):
     """Orden BRACKET para intradia: entrada a mercado + take-profit (limit) y
     stop-loss (stop). Alpaca gestiona la salida sola cuando se toca TP o SL.

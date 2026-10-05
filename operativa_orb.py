@@ -7,8 +7,9 @@ backtest ganador):
   - Rango de apertura = 1ª vela de 5 min (09:30-09:35 ET). 1ª vela ALCISTA + RVOL de
     apertura > 1 (vol 1ª vela 5m / media 14 días).
   - Entrada: cuando una vela de 5m CIERRA sobre el máximo del rango (ruptura CONFIRMADA),
-    dentro de las primeras 2h. Bracket: stop al MÍNIMO del rango, TP lejano (mantener).
-  - Mantener hasta el CIERRE (EOD): se cierran todas a <5 min del cierre.
+    dentro de las primeras 2h. Bracket REALISTA: stop al mínimo del rango pero acotado al
+    3% máx (más ceñido en rupturas ya extendidas) y take-profit a 2R (2× el riesgo).
+  - Si no toca TP ni SL, se mantiene hasta el CIERRE (EOD): se cierran a <5 min del cierre.
   - Sizing: riesgo fijo ORB_RIESGO del equity por trade; máx ORB_MAX simultáneas.
   - REGISTRA intención (cierre de la vela que confirma) vs fill real -> slippage, en
     datos/orb_paper.csv. Ese es el entregable de la Fase 0.
@@ -33,7 +34,7 @@ LOG = "datos/orb_paper.csv"
 ORB_RIESGO = 0.005        # 0.5% del equity en riesgo por trade
 ORB_MAX = 10              # máx posiciones ORB simultáneas
 VENTANA_MIN = 120         # solo entrar en las primeras 2h tras la apertura
-TP_LEJANO = 0.20          # TP a +20% (≈ nunca se toca intradía; mantener hasta EOD)
+ORB_TP_R = 2.0            # take-profit a 2R (objetivo = 2× el riesgo). Antes: +20% fijo, irreal.
 CAMPOS = ["ts", "ticker", "or_high", "or_low", "intencion", "qty", "stop", "opening_rvol",
           "order_id", "fill", "slippage_pct", "salida", "pnl", "estado"]
 
@@ -128,14 +129,17 @@ def ejecutar(confirmar=False):
         if s is None:
             continue
         entry = s["intencion"]
-        rdist = entry - s["or_low"]
-        if rdist <= 0:
+        rdist_raw = entry - s["or_low"]            # riesgo natural: stop en el mínimo del rango
+        if rdist_raw <= 0:
             continue
-        qty = int((equity * ORB_RIESGO) / rdist)
+        # TP/SL realistas: stop acotado al 3% máx (AT.INTRADIA_SL_MAX) y objetivo a 2R. En
+        # rupturas muy extendidas el mínimo del rango queda lejísimos -> stop más ceñido para
+        # que el riesgo (y el TP) sean realistas, en vez de un objetivo del 15-20%.
+        tp, sl = AT.niveles_bracket(entry, rdist_raw / entry, r_mult=ORB_TP_R, lado="buy")
+        rdist = entry - sl                          # riesgo real por acción tras acotar el stop
+        qty = int((equity * ORB_RIESGO) / rdist) if rdist > 0 else 0
         if qty <= 0:
             continue
-        tp = round(entry * (1 + TP_LEJANO), 2)
-        sl = round(s["or_low"], 2)
         fila = {"ts": _ahora_et().isoformat(), "ticker": t, "or_high": s["or_high"],
                 "or_low": s["or_low"], "intencion": entry, "qty": qty, "stop": sl,
                 "opening_rvol": round(s["opening_rvol"], 2), "order_id": "", "fill": np.nan,
