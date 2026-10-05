@@ -306,13 +306,23 @@ def cerrar_intradia(confirmar=False):
     dia, porque se abrieron hoy). Con confirmar=False es dry-run.
     """
     ordenes = ordenes_abiertas()
-    simbolos = sorted(set(o["symbol"] for o in ordenes))
+    # SOLO el libro de momentum ('intradia-...'). NUNCA toca overnight (órdenes MOC/MOO
+    # tif 'cls'/'opg') ni ORB/pairs/fade/TSMOM: un blanket DELETE /orders cancelaba la
+    # entrada overnight pendiente y, al estar QQQ/SPY/IWM en TSMOM, aplanaba también TSMOM.
+    intradia_ord = [o for o in ordenes
+                    if str(o.get("client_order_id", "")).startswith("intradia-")
+                    and o.get("time_in_force") not in ("cls", "opg")]
+    simbolos = sorted(set(o["symbol"] for o in intradia_ord))
     pos = posiciones()
     a_cerrar = [t for t in simbolos if t in pos]
     pl = {t: pos[t]["pl"] for t in a_cerrar}
     if not confirmar:
         return {"dry_run": True, "cerraria": a_cerrar, "pl": pl}
-    requests.delete(_url("orders"), headers=_headers(), timeout=30)   # cancela los brackets
+    for o in intradia_ord:                        # cancela SOLO las órdenes intradía, por id
+        try:
+            requests.delete(_url(f"orders/{o['id']}"), headers=_headers(), timeout=30)
+        except Exception:
+            pass
     cerradas = []
     for t in a_cerrar:
         try:
