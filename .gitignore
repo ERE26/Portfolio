@@ -35,3 +35,7 @@ datos/overnight_paper.csv
 datos/pairs_paper.csv
 datos/fade_paper.csv
 datos/overnight_overlays_dump.json
+datos/ensemble_eventos.csv
+datos/ensemble_eventos_lag1.csv
+datos/ensemble_smoke.csv
+datos/*.parquet
