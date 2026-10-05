@@ -196,6 +196,35 @@ def _nuevo_sl_breakeven(entrada, sl_actual, precio, trig_R=BE_TRIGGER_R):
     return None
 
 
+def _tickers_otros_libros():
+    """Tickers con posición abierta en OTROS libros (ORB / pairs / fade / overnight). El
+    libro de momentum NO debe gestionarlos: si no, cierra o mueve el stop de posiciones que
+    no son suyas (colisión que borraba los OCO del ORB). Lee los logs de cada libro."""
+    import os
+    out = set()
+
+    def _vivos(ruta, vivos, cerrados=()):
+        if not os.path.exists(ruta):
+            return set()
+        try:
+            df = pd.read_csv(ruta)
+        except Exception:
+            return set()
+        if "ticker" not in df.columns or "estado" not in df.columns:
+            return set()
+        ab = set(df[df["estado"].isin(vivos)]["ticker"].astype(str))
+        if cerrados:
+            ab -= set(df[df["estado"].isin(cerrados)]["ticker"].astype(str))
+        return ab
+
+    out |= _vivos("datos/orb_paper.csv", ("abierta",), ("cerrada",))
+    out |= _vivos("datos/fade_paper.csv", ("enviada", "hecha"))
+    out |= _vivos("datos/pairs_paper.csv", ("enviada", "hecha"))
+    out |= _vivos("datos/overnight_paper.csv", ("enviada", "hecha"))
+    out.discard("nan")
+    return out
+
+
 def revisar_intradia(mover_be=False):
     """Re-analiza cada posicion intradia con las velas nuevas y decide si cerrar.
 
@@ -205,7 +234,10 @@ def revisar_intradia(mover_be=False):
     sola barra roja NO cierra (para eso esta el SL del bracket); mantener una
     organica esta bien, pero mantenerla ETERNAMENTE pierde la estrategia intradia."""
     ordenes = AT.ordenes_abiertas()
-    simbolos = sorted(set(o["symbol"] for o in ordenes))
+    # COLISIÓN DE LIBROS: el momentum solo gestiona SUS posiciones; nunca cierra ni mueve el
+    # stop de las de ORB/pairs/fade/overnight (antes barría sus OCO al tratarlas como intradía).
+    ajenos = _tickers_otros_libros()
+    simbolos = sorted(set(o["symbol"] for o in ordenes) - ajenos)
     pos = AT.posiciones()
     # SL vigente por ticker (pata 'stop' del bracket) para el break-even
     sl_actual = {o["symbol"]: float(o["stop_price"]) for o in ordenes
