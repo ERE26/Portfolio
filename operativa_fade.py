@@ -114,11 +114,18 @@ def gestionar(confirmar=False):
         fila = {"ts": et.isoformat(), "ticker": t, "gap": round(g["gap"], 4), "lado": lado,
                 "qty": qty, "entrada": round(px, 2), "tp": tp, "sl": sl, "order_id": "",
                 "fill": np.nan, "slippage_pct": np.nan, "estado": "pend"}
+        estado_msg = "[dry]"
         if confirmar:
-            r = AT.enviar_bracket(t, qty, tp, sl, lado=lado, confirmar=True, libro="fade")
-            fila["order_id"] = r.get("id", "")
-            fila["estado"] = "enviada" if r.get("id") else "error"
-        print(f"  {'[dry] ' if not confirmar else ''}FADE {('CORTO' if lado=='sell' else 'LARGO')} "
+            try:
+                r = AT.enviar_bracket(t, qty, tp, sl, lado=lado, confirmar=True, libro="fade")
+                fila["order_id"] = r.get("id", "")
+                fila["estado"] = "enviada" if r.get("id") else "error"
+                estado_msg = fila["estado"]
+            except Exception as e:
+                # low-floats suelen ser HARD-TO-BORROW: el corto se rechaza. Hallazgo real.
+                fila["estado"] = "rechazada"
+                estado_msg = f"rechazada ({str(e)[:40]})"
+        print(f"  {estado_msg} FADE {('CORTO' if lado=='sell' else 'LARGO')} "
               f"{t} x{qty} gap {g['gap']*100:+.1f}% @~{px:.2f} TP {tp} SL {sl}")
         nuevas.append(fila)
     if confirmar and nuevas:
