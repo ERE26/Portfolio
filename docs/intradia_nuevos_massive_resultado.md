@@ -135,4 +135,40 @@ poco poblado.
   Merecería re-testearse con más historia o un universo algo menos líquido (que gapea más)
   para ver si el lean positivo es real; con los datos de aquí es **sugerente pero no probado**.
 
-<!-- SIGUIENTES SECCIONES: mean-reversion ETF/large-cap, time-of-day -->
+---
+
+## Estrategia 3 — MEAN-REVERSION al VWAP en ETFs + large-caps · `backtest_meanrev_massive.py`
+
+Distinta a la mean-reversion ya descartada (aquella era sobre mid-caps "in play"). Aquí el
+universo es **líquido y sin problema de supervivencia**: ETFs de índice/sector (SPY, QQQ,
+IWM, DIA, XLK…) + top-30 large-caps por dólar-volumen point-in-time. Setup: extensión
+`z = (close − VWAP) / ATR_bar`; `z ≤ −k` → **largo** (objetivo VWAP), `z ≥ +k` → **corto**
+(objetivo VWAP); stop a `m·ATR`; una entrada por día y lado; se evita la última media hora.
+`k = 1.5`, `m = 1.0`.
+
+**Muestra**: 40 tickers × 15 días × 20 meses (≈600 pares/semilla → muestra grande).
+
+| modo | semilla | ops | acierto | expectancy (R) | IC95 | PF | veredicto |
+|---|---|---:|---:|---:|---|---:|---|
+| LARGO | 42 | 442 | 38% | -0.368 | [-0.478, -0.252] | 0.54 | PIERDE |
+| LARGO | 7 | 470 | 39% | -0.399 | [-0.505, -0.293] | 0.49 | PIERDE |
+| LARGO | 123 | 416 | 41% | -0.329 | [-0.441, -0.217] | 0.56 | PIERDE |
+| LARGO | **pooled** | 1328 | 39% | **-0.367** | [-0.429, -0.301] | 0.53 | PIERDE |
+| CORTO | 42 | 423 | 38% | -0.474 | [-0.590, -0.358] | 0.43 | PIERDE |
+| CORTO | 7 | 402 | 44% | -0.394 | [-0.508, -0.273] | 0.49 | PIERDE |
+| CORTO | 123 | 412 | 46% | -0.279 | [-0.404, -0.153] | 0.62 | PIERDE |
+| CORTO | **pooled** | 1237 | 42% | **-0.383** | [-0.451, -0.316] | 0.51 | PIERDE |
+| L+S | **pooled** | 2565 | 41% | **-0.375** | [-0.423, -0.326] | 0.52 | PIERDE |
+
+**Veredicto Estrategia 3: PIERDE, robusto y con muestra grande.**
+- Largo y corto **pierden en las 3 semillas**, con IC95 que **excluye el 0 por abajo** en
+  todas (≈ −0,37 R por operación). Con >1.200 ops por lado y semilla, esto no es ruido: es
+  un resultado sólido y negativo.
+- Acierto **< 46%**: la extensión respecto al VWAP **no revierte** — continúa (momentum
+  intradía), y el stop a 1·ATR salta antes de que el precio vuelva al VWAP. Fadear
+  extensiones de ETFs/large-caps líquidos es perder dinero a mano.
+- Confirma y **extiende a universo limpio** el hallazgo previo del repo (la mean-reversion
+  a VWAP pierde): no era un artefacto del universo mid-cap; tampoco funciona en índices y
+  large-caps. Puerta cerrada.
+
+<!-- SIGUIENTE SECCIÓN: time-of-day -->
