@@ -31,8 +31,9 @@ from fuentes import alpaca
 from fuentes import alpaca_trade as AT
 
 LOG = "datos/orb_paper.csv"
-ORB_RIESGO = 0.005        # 0.5% del equity en riesgo por trade
+ORB_RIESGO = 0.006        # 0,6% del equity en riesgo por trade (algo más de volumen)
 ORB_MAX = 10              # máx posiciones ORB simultáneas
+ORB_MAX_NOTIONAL = 0.12   # tope de exposición por nombre: 12% del equity (evita concentración)
 VENTANA_MIN = 120         # solo entrar en las primeras 2h tras la apertura
 ORB_TP_R = 2.0            # take-profit a 2R (objetivo = 2× el riesgo). Antes: +20% fijo, irreal.
 CAMPOS = ["ts", "ticker", "or_high", "or_low", "intencion", "qty", "stop", "opening_rvol",
@@ -138,6 +139,7 @@ def ejecutar(confirmar=False):
         tp, sl = AT.niveles_bracket(entry, rdist_raw / entry, r_mult=ORB_TP_R, lado="buy")
         rdist = entry - sl                          # riesgo real por acción tras acotar el stop
         qty = int((equity * ORB_RIESGO) / rdist) if rdist > 0 else 0
+        qty = min(qty, int((equity * ORB_MAX_NOTIONAL) / entry))   # tope de exposición por nombre
         if qty <= 0:
             continue
         fila = {"ts": _ahora_et().isoformat(), "ticker": t, "or_high": s["or_high"],
@@ -159,6 +161,50 @@ def ejecutar(confirmar=False):
         _guardar(pd.concat([df, pd.DataFrame(nuevos)], ignore_index=True))
     elif not confirmar:
         print("  (ningún setup ORB confirmado ahora)")
+
+
+def proteger(confirmar=False):
+    """Sube el stop a BREAKEVEN en las posiciones ORB que ya ganan >= +1R (el riesgo inicial
+    del log). Así un ganador no puede convertirse en perdedor ('mejor beneficio'). PAPER."""
+    df = _log()
+    abiertas = df[df["estado"] == "abierta"] if len(df) else df
+    if not len(abiertas):
+        print("ORB proteger: sin posiciones abiertas en el log."); return
+    try:
+        pos = AT.posiciones()
+        ordenes = AT.ordenes_abiertas()
+    except Exception as e:
+        print(f"ORB proteger: error cuenta ({str(e)[:50]})"); return
+    # stop vivo actual por ticker (para no BAJAR nunca un stop ya colocado)
+    stop_vivo = {}
+    for o in ordenes:
+        if (o.get("side") == "sell" and o.get("type") in ("stop", "stop_limit")
+                and o.get("stop_price")):
+            stop_vivo[o["symbol"]] = float(o["stop_price"])
+    movidos = 0
+    for _, r in abiertas.groupby("ticker").last().reset_index().iterrows():
+        t = r["ticker"]
+        if t not in pos:
+            continue
+        try:
+            entry = float(r["intencion"]); stop0 = float(r["stop"])
+        except Exception:
+            continue
+        rdist = entry - stop0
+        if rdist <= 0:
+            continue
+        ent_real = pos[t]["entrada"]; px = pos[t]["precio"]
+        if px < ent_real + rdist:                      # aún no +1R
+            continue
+        nuevo = round(ent_real * 1.001, 2)             # breakeven + 0,1%
+        if nuevo <= stop_vivo.get(t, -1e9):            # nunca bajar un stop ya protegido
+            continue
+        res = AT.mover_stop(t, nuevo, confirmar=confirmar)
+        if res.get("movido") or res.get("dry_run"):
+            movidos += 1
+            print(f"  {t}: +1R -> stop a breakeven {nuevo} ({'enviado' if confirmar else 'dry'})")
+    if not movidos:
+        print("ORB proteger: nada que mover (ninguna en +1R o ya protegidas).")
 
 
 def reconciliar():
@@ -210,6 +256,8 @@ def cerrar_eod(confirmar=False):
 if __name__ == "__main__":
     if "--reconciliar" in sys.argv:
         reconciliar()
+    elif "--proteger" in sys.argv:
+        proteger(confirmar="--enviar" in sys.argv)
     elif "--cerrar" in sys.argv:
         cerrar_eod(confirmar="--enviar" in sys.argv)
     else:

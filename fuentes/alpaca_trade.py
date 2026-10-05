@@ -190,6 +190,33 @@ def niveles_bracket(precio, sl_dist_pct, r_mult=2.0, lado="buy"):
     return round(tp, 2), round(sl, 2)
 
 
+def reajustar_salida(ticker, qty, tp_price, sl_price, lado_salida="sell", confirmar=False):
+    """Re-bracketea una posición YA ABIERTA: cancela sus órdenes abiertas y coloca un OCO de
+    salida (take-profit limit + stop-loss stop) a niveles nuevos. Para corregir brackets con
+    TP/SL irreales sin cerrar la posición. lado_salida 'sell' para largos, 'buy' para cortos.
+    Con confirmar=False es dry-run (no cancela ni envía). PAPER."""
+    import time
+    qty = int(qty)
+    if qty <= 0 or lado_salida not in ("buy", "sell"):
+        return {"omitida": True, "ticker": ticker, "qty": qty}
+    cancelar = [o["id"] for o in ordenes_abiertas() if o.get("symbol") == ticker]
+    cuerpo = {"symbol": ticker, "qty": str(qty), "side": lado_salida,
+              "type": "limit", "time_in_force": "day", "order_class": "oco",
+              "take_profit": {"limit_price": round(float(tp_price), 2)},
+              "stop_loss": {"stop_price": round(float(sl_price), 2)}}
+    if not confirmar:
+        return {"dry_run": True, "cancelaria": cancelar, **cuerpo}
+    for oid in cancelar:
+        try:
+            requests.delete(_url(f"orders/{oid}"), headers=_headers(), timeout=30)
+        except Exception:
+            pass
+    time.sleep(1.0)                      # deja que Alpaca libere la qty de los legs cancelados
+    r = requests.post(_url("orders"), json=cuerpo, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def enviar_bracket(ticker, qty, tp_price, sl_price, lado="buy", confirmar=False, libro=None):
     """Orden BRACKET para intradia: entrada a mercado + take-profit (limit) y
     stop-loss (stop). Alpaca gestiona la salida sola cuando se toca TP o SL.

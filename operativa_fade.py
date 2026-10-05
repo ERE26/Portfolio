@@ -27,7 +27,7 @@ LOG = "datos/fade_paper.csv"
 GAP_MIN = 0.04            # |gap| de apertura mínimo para fadear (4%)
 TP_PCT = 0.012           # objetivo de fade (cerca -> alto acierto)
 SL_PCT = 0.045           # stop lejos (raro, pero grande -> expectancy negativa)
-NOTIONAL = 1000.0        # $ por trade (medición)
+NOTIONAL = 2000.0        # $ por trade (más volumen; sigue siendo experimento Sharpe-negativo)
 MAX_POS = 6
 CAMPOS = ["ts", "ticker", "gap", "lado", "qty", "entrada", "tp", "sl", "order_id",
           "fill", "slippage_pct", "estado"]
