@@ -65,6 +65,7 @@ la validación honesta: la mayoría de ideas no sobreviven, y el superviviente e
 | **Low-float runners — gap-and-go** (universo del day-trader retail, PIT) | −0,07/−0,12R @25bps (IC95 cruza 0); muere a 50bps | ❌ | ejecución (spread) |
 | **Low-float runners — ORB runner** | −0,19/+0,05R (IC95 cruza 0, inconsistente entre ventanas); muere a 50-100bps | ❌ | ruido + ejecución |
 | **Low-float runners — short parabólico** | −0,77/−0,32R, **PIERDE siempre** (~80% stops); borrow caro/HTB | ❌ | el runner te arrolla |
+| **Meta-modelo ENSEMBLE** (meta-labeling LdP: reversión + 15 features, 276k eventos, triple-barrera, purged WF) | TAKER nunca robusto (lag0 +14bps DSR0,84 sobre 0,12% eventos; lag1 +4bps DSR0,37 IC cruza 0). "Robusto" solo en MAKER, y **gross/evento +0,36→−0,02bps con entry_lag=1** | ❌ **rebote bid-ask** | mezclar señales débiles concentra el spread, no crea alfa (ver `ensemble_metamodel_resultado.md`) |
 
 **Matiz clave del pairs/stat-arb:** es el **único intradía con señal bruta real y robusta**
 de todo el estudio (reversión genuina del spread de ETFs emparejados). Pero su break-even está
