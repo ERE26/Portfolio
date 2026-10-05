@@ -190,6 +190,29 @@ def niveles_bracket(precio, sl_dist_pct, r_mult=2.0, lado="buy"):
     return round(tp, 2), round(sl, 2)
 
 
+def enviar_bracket_maker(ticker, qty, limit_entry, tp_price, sl_price, lado="buy",
+                         confirmar=False, libro=None):
+    """Bracket con entrada LÍMITE (maker): la orden DESCANSA en el libro y, si el precio viene a
+    ella, cruza como proveedor de liquidez -> cobras ~medio spread en vez de pagarlo. Es la única
+    vía por la que el scalping de beneficios pequeños puede no perder a costes. TP (limit) y SL
+    (stop) como salidas OCO. Si no cruza, caduca en el día (time_in_force='day'). PAPER."""
+    qty = int(qty)
+    if qty <= 0 or lado not in ("buy", "sell"):
+        return {"omitida": True, "ticker": ticker, "qty": qty}
+    cuerpo = {"symbol": ticker, "qty": str(qty), "side": lado, "type": "limit",
+              "limit_price": round(float(limit_entry), 2), "time_in_force": "day",
+              "order_class": "bracket",
+              "take_profit": {"limit_price": round(float(tp_price), 2)},
+              "stop_loss": {"stop_price": round(float(sl_price), 2)}}
+    if libro:
+        cuerpo["client_order_id"] = f"{libro}-{uuid.uuid4().hex[:16]}"
+    if not confirmar:
+        return {"dry_run": True, **cuerpo}
+    r = requests.post(_url("orders"), json=cuerpo, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def reajustar_salida(ticker, qty, tp_price, sl_price, lado_salida="sell", confirmar=False):
     """Re-bracketea una posición YA ABIERTA: cancela sus órdenes abiertas y coloca un OCO de
     salida (take-profit limit + stop-loss stop) a niveles nuevos. Para corregir brackets con

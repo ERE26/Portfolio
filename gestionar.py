@@ -221,6 +221,7 @@ def _tickers_otros_libros():
     out |= _vivos("datos/fade_paper.csv", ("enviada", "hecha"))
     out |= _vivos("datos/pairs_paper.csv", ("enviada", "hecha"))
     out |= _vivos("datos/overnight_paper.csv", ("enviada", "hecha"))
+    out |= _vivos("datos/scalp_paper.csv", ("enviada",), ("cerrada",))
     out.discard("nan")
     return out
 
