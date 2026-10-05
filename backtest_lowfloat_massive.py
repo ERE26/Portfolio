@@ -39,7 +39,7 @@ import random
 import numpy as np
 import pandas as pd
 
-import universo_pit as U
+import universo_runners_pit as U
 from fuentes import massive as mv
 
 NY_ABRE, NY_OR_FIN, NY_CIERRE = "09:30", "09:35", "15:59"
@@ -82,7 +82,8 @@ def cargar_dia(ticker, fecha, cm, cache):
     if clave in cache:
         return cache[clave]
     try:
-        df = mv.barras_intradia(ticker, fecha, fecha, mult=1, cm=cm)
+        df = mv.barras_intradia(ticker, "1Min", fecha, fecha, ajustado=False, cm=cm,
+                                incluir_vwap=True)          # ya viene a horario regular (ET)
     except Exception:
         cache[clave] = None
         return None
@@ -359,7 +360,7 @@ def main():
     ap.add_argument("--json", default="")
     a = ap.parse_args()
 
-    cm = mv.ClienteMassive(pausa_min=0.05)
+    cm = mv.ClienteMassive(pausa_min=mv.PAUSA_STARTER)
     print(f"# Universo PIT de runners {a.desde} -> {a.hasta} (top {a.topk}/dia)")
     panel = U.panel_grouped(a.desde, a.hasta, cm=cm)
     sp = U.splits_set(a.desde, a.hasta, cm=cm)
