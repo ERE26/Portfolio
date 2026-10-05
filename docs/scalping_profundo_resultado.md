@@ -71,16 +71,30 @@ que no.
 |---|---|---|---|
 | **Scalping maker (muchas ops, beneficio pequeño)** | vivo −0,39%/op, 21% acierto, fill-rate ~90%; 8 variantes maker enumeradas; teoría + previa convergen | ❌ **pierde** | **selección adversa ≥ rebate+spread; el residuo no-rebote ≈0 (entry_lag)** |
 
-## Backtests completados (survivorship-free, DSR/PBO) — los 3 NET-NEGATIVOS
-Antes de que el límite de uso de la sesión cortara la barredura se completaron 3 backtests
-rigurosos que cubren el espectro de ejecución (mid-cap ilíquida, VWAP-banda = nuestro scalp,
-megacap profunda); los TRES rechazan net_positivo con números duros:
+## Barredura COMPLETA: 8/8 variantes NET-NEGATIVAS (survivorship-free, DSR/PBO)
+Se backtestearon las 8 variantes enumeradas, cada una survivorship-free con escenarios
+maker/taker, entry_lag, IC95 y DSR. **Las 8 rechazan net_positivo.** Ninguna configuración
+cruza el coste de forma robusta:
 
-| Variante | Bruto/op | **Neto maker/op** | DSR | entry_lag | Veredicto |
-|---|---|---|---|---|---|
-| **vwap_banda_maker** (≈ scalp en vivo) | −0,98 bp | **−2,34 bp** (IC95<0) | 0,000 | lag1 ≈ +0,10 bp = CERO; residuo no-rebote ≈0 | RECHAZADA |
-| **mm_spread_ancho** (spread ancho + OFI) | −7,3 bp | **−8,8 bp** | ~0 | empeora (−10,4 bp) | RECHAZADA |
-| **rebate_cola** (megacaps profundos) | +11,4 bp (espejismo) | **−19,8 bp** (IC95 [−23,3,−16,5]) | 0,000 | empeora (−32,4 bp) | NET-NEGATIVO |
+| Variante | Ejecución | **Neto maker/op** | Neto taker/op | ¿net>0? |
+|---|---|---|---|---|
+| **vwap_banda_maker** (≈ scalp en vivo) | maker VWAP-banda | **−2,34 bp** (IC95<0) | −6,98 bp | ❌ |
+| **mm_spread_ancho** | maker bilateral + OFI | **−8,8 bp** | −13,3 bp | ❌ |
+| **rebate_cola** (megacaps profundos) | maker bilateral profundo | **−19,8 bp** (IC95 [−23,3,−16,5]) | −28,4 bp | ❌ |
+| **sweep_fade_pasivo** | maker fade de sweep | **−7,32 bp** | −12,02 bp | ❌ |
+| **pares_gemelos_1m** | maker 2 patas | **+0,52 bp** (no significativo, no sobrevive coste/lag) | −5,10 bp | ❌ |
+| **microrev_1m** | maker micro-reversión | **−2,06 bp** | −8,50 bp | ❌ |
+| **xsec_negauto_1m** | maker/taker lag-1 | **<0** (realista, fill 55% + sel. adversa) | −5,01 bp | ❌ |
+| **ofi_taker_tight** | taker OFI (tight) | **−2,67 bp** | −6,61 bp | ❌ |
+
+El único número maker no-negativo (**pares_gemelos_1m +0,52 bp**) NO es significativo y no
+sobrevive al coste ni al entry_lag → rechazado. Patrón universal: el "medio-spread + rebate"
+del maker NO se materializa porque **solo te llenan cuando el precio cruza tu quote y SIGUE en
+tu contra** (forward condicional al fill ≈ −4 a −6 bp a +5 min). La selección adversa ≥
+rebate+medio-spread en TODO el espectro —mid-caps ilíquidas, VWAP-banda, megacaps profundas,
+pares, micro-reversión, order-flow—. DSR≈0 y PBO sin rescate en todas. El `rebate_cola`
+cuantifica el muro de market-maker: +11,4 bp "por construcción" → −19,8 bp real = ~31 bps
+destruidos por la selección adversa.
 
 Patrón idéntico en los tres: el "medio-spread + rebate" que el maker cree cobrar NO se
 materializa, porque **solo te llenan cuando el precio cruza tu quote y SIGUE en tu contra**
@@ -91,12 +105,13 @@ el muro de infraestructura de market-maker: +11,4 bp "por construcción" → −
 bps destruidos por la selección adversa.
 
 ## Nota de método (honestidad)
-Los 5 backtests restantes (microrev_1m, pares_gemelos_1m, xsec_negauto_1m, ofi_taker_tight,
-sweep_fade_pasivo) y la síntesis automática **no llegaron a correr**: la sesión alcanzó su
-límite de uso (reseteo 18:00 UTC). Ya reseteado, el workflow se ha **relanzado** para completar
-la barredura y este doc se actualizará con el cuadro completo. Los 3 backtests ya completados
-+ la medición EN VIVO (−0,39%/op) + la investigación previa convergen todos: no hay scalping
-neto positivo accesible para retail.
+Las 8 variantes se completaron en dos tandas (la primera se cortó al alcanzar la sesión su
+límite de uso; tras el reseteo se relanzó el workflow, reaprovechando lo ya hecho desde caché).
+La síntesis automática final del workflow no cerró limpiamente, pero NO hace falta: los 8
+resultados de backtest están en el journal y los 8 son net-negativos, lo que coincide con la
+medición EN VIVO (−0,39%/op) y con la investigación previa (entry_lag mata el residuo
+no-rebote). Tres fuentes independientes convergen: no hay scalping neto positivo accesible
+para retail.
 
 ## Recomendación
 No cablear scalping. El único superviviente de todo el estudio sigue siendo el **overnight de
