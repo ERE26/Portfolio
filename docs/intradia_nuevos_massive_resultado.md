@@ -171,4 +171,85 @@ IWM, DIA, XLK…) + top-30 large-caps por dólar-volumen point-in-time. Setup: e
   a VWAP pierde): no era un artefacto del universo mid-cap; tampoco funciona en índices y
   large-caps. Puerta cerrada.
 
-<!-- SIGUIENTE SECCIÓN: time-of-day -->
+---
+
+## Estrategia 4 — TIME-OF-DAY (caracterización horaria) · `backtest_timeofday_massive.py`
+
+Descriptivo (no una estrategia con stops): mide el **retorno medio bruto por tramo horario**
+sobre el universo PIT de acciones, y dos tests direccionales: **momentum de última hora**
+(¿la dirección de la mañana continúa 15:00–16:00?) y **reversión de mediodía** (¿se fadea la
+mañana entre 12:00–14:00?). Retornos **brutos** (sin coste): si no hay sesgo bruto, menos aún
+neto. 30 tickers × 15 días × 20 meses, ≈1.346 ticker-días/semilla.
+
+### Retorno medio por tramo (pooled de las 3 semillas, bps)
+
+| tramo ET | media pooled | IC95 | signif.? | ¿consistente entre semillas? |
+|---|---:|---|---|---|
+| 09:30–10:00 | +2.3 | [-6.5, +10.9] | no | no |
+| 10:00–11:00 | -0.2 | [-6.8, +6.5] | no | no |
+| 11:00–12:00 | **-11.5** | [-16.4, -6.7] | SÍ | 2/3 (42 no sig.) |
+| 12:00–13:00 | +1.9 | [-2.3, +6.0] | no | no |
+| 13:00–14:00 | +15.6 | [+7.0, +25.5] | SÍ | **no** (lo lleva seed 42: +41.6 vs +8.6/−3.4) |
+| 14:00–15:00 | **-11.4** | [-15.3, -7.6] | SÍ | 2/3 (seed 7 no sig.) |
+| 15:00–16:00 | -0.9 | [-5.3, +3.3] | no | no |
+
+### Tests direccionales (pooled, bps brutos)
+
+| test | pooled | IC95 | signif.? | por semilla |
+|---|---:|---|---|---|
+| momentum última hora (signo mañana × ret 15–16h) | **+7.5** | [+3.4, +11.6] | SÍ | 42 +19.4 SÍ · 7 −3.2 no · 123 +6.5 SÍ |
+| reversión mediodía (−signo mañana × ret 12–14h) | -8.3 | [-19.6, +2.4] | no | 42 −16.7 no · 7 +10.2 no · 123 −18.3 SÍ |
+
+**Veredicto Estrategia 4: no hay un sesgo horario limpio y robusto explotable.**
+- Los tramos con media *pooled* significativa (débil mañana 11–12h, debilidad 14–15h, fuerza
+  13–14h) **no son consistentes entre semillas**: el "+15,6 bps de 13–14h" lo produce casi
+  entero la semilla 42 (+41,6 vs +8,6 / −3,4). Son artefactos de muestra, no estructura.
+- **Reversión de mediodía: no existe** (pooled −8,3 bps, IC95 incluye 0; de hecho el signo
+  dice que fadear la mañana *pierde*, es decir hay más continuación que reversión).
+- **Momentum de última hora: señal débil pero la más coherente del estudio.** La dirección
+  del día tiende a **continuar** de 15:00 a 16:00: +7,5 bps *pooled* (IC95 excluye 0) y
+  significativa en 2 de 3 semillas. Pero: (1) es **bruta** — un round-trip de ~2–4 bps se
+  come la mitad; (2) **falla la semilla 7** (−3,2 bps), así que no supera el listón de las 3
+  semillas; (3) es justo lo **contrario** a lo que encontró el estudio de ETFs (allí la
+  última hora de SPY/QQQ/IWM *perdía*). En acciones hay un rastro de continuación; en índices
+  revierte. Nada que cablear: sesgo débil, no robusto y marginal neto de coste.
+
+---
+
+## Síntesis — los 4 ángulos nuevos
+
+| estrategia | muestra | resultado | ¿edge robusto (IC95>0 en 3 semillas)? |
+|---|---|---|---|
+| **1. Lado corto (breakdown)** | ~450 ops/seed | EOD −0,09 R (IC95 cruza 0); trailing **PIERDE** | **NO** |
+| **2. Gap-fade (>3% / >2%)** | 10–54 ops/seed | acierto 55–73%, lean positivo que se diluye con más potencia | **NO** (sugerente, infra-potenciado) |
+| **3. Mean-reversion VWAP (ETF+LC)** | ~1.300 ops/seed por lado | **PIERDE** robusto (−0,37 R, IC95 excluye 0, los 2 lados y 3 semillas) | **NO (pierde)** |
+| **4. Time-of-day** | ~1.346 días/seed | solo un momentum débil de última hora (+7,5 bps bruto, 2/3 semillas) | **NO** |
+
+**Conclusión honesta:** ninguno de los cuatro ángulos nuevos es un edge robusto sobre datos
+limpios point-in-time. Es información valiosa:
+
+1. **El lado corto no resucita el ORB** — simétrico al largo: no era la dirección, es que no
+   hay edge de ruptura una vez quitada la supervivencia (el trailing incluso pierde).
+2. **La mean-reversion a VWAP pierde también en índices/large-caps**, no solo en mid-caps: la
+   extensión intradía **continúa**, no revierte. Puerta cerrada del todo.
+3. **No hay estructura horaria explotable** en acciones; el único rastro (continuación de
+   última hora) es débil, bruto y no robusto, y contradice al de ETFs.
+4. El **gap-fade de acciones** es el único con perfil de reversión real (acierto alto, PF>1,
+   lean positivo), pero **sin potencia** para probarse: los gaps grandes son raros en nombres
+   líquidos. Es el único candidato que merecería re-test con más historia / universo que
+   gapee más — no para cablear hoy.
+
+Esto **concuerda** con el mapa del repo: casi todo el intradía direccional muere en limpio.
+El único superviviente de toda la campaña Massive sigue siendo el **overnight de QQQ filtrado
+por tendencia** (`docs/intradia_massive_resultado.md`), que **no es intradía**. El intradía
+limpio, por ahora, no da un edge nuevo robusto.
+
+### Avisos honestos
+
+- **Muestras pequeñas a propósito** (la descarga de minuto es pesada): el veredicto de "no
+  edge" es sólido donde la muestra es grande (mean-reversion: >1.300 ops) y más tentativo
+  donde es pequeña (gap-fade >3%: 10–23 ops/semilla). Por eso el gap-fade queda como
+  "sugerente", no como "muerto".
+- **Solo research/paper.** Nada de esto está cableado en vivo ni toca la operativa.
+- **Costes incluidos**: SLIP 4 bps/lado, SLIP_STOP 8 bps, borrow 3 bps en cortos. El
+  time-of-day se reporta en bruto (y aún así no hay edge).
