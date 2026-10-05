@@ -125,15 +125,48 @@ Al bajar a >2% (duplica la muestra), el *edge* **se diluye**: la expectancy *poo
 ningún IC95 excluye el 0. Clásico de muestra pequeña: lo "bonito" del >3% era el extremo
 poco poblado.
 
-**Veredicto Estrategia 2: NO hay edge robusto, pero hay una señal sugerente honesta.**
-- El gap-fade de acciones tiene el perfil típico de reversión: **acierto alto** (55–73%),
-  PF > 1 casi siempre, expectancy positiva en el *pooled* de las dos salidas y umbrales.
-- No pasa el listón de robustez: a >3% las muestras son demasiado pequeñas (10–23 ops/semilla)
-  y a >2% el *edge* se encoge hacia cero y una semilla se vuelve negativa. El IC95>0 **no se
-  da en las 3 semillas** en ninguna configuración.
-- Lectura honesta: es el ángulo **menos muerto** de los tres de entrada/salida direccional.
-  Merecería re-testearse con más historia o un universo algo menos líquido (que gapea más)
-  para ver si el lean positivo es real; con los datos de aquí es **sugerente pero no probado**.
+### Re-test con ~4,5 años de historia (prescreen de gaps) — zanja la duda
+
+El muestreo aleatorio de días malgasta descargas de minuto porque los gaps grandes son
+raros. Solución (`--historia`): **prescreen barato** con barras diarias GROUPED (1 request
+por día para TODO el mercado, sin minuto) para enumerar *todos* los eventos |gap|>3% en
+~54 meses, y descargar minuto **solo** de los eventos. Resultado del prescreen: **6.891
+eventos** candidatos en el universo PIT (vs. 49 ops en el test original). Se barajan (semilla
+fija) y se parten en **3 folds disjuntos** (= 3 muestras independientes) de 400 eventos;
+≈255 operan tras la confirmación de giro (≈770 ops/modo en total), con split cronológico.
+
+| modo | semilla | ops | acierto | expectancy (R) | IC95 | PF | veredicto |
+|---|---|---:|---:|---:|---|---:|---|
+| objGapFill | 42 | 255 | 54% | -0.004 | [-0.097, +0.086] | 0.99 | sin edge |
+| objGapFill | 7 | 260 | 50% | -0.058 | [-0.146, +0.030] | 0.82 | sin edge |
+| objGapFill | 123 | 254 | 59% | +0.092 | [-0.000, +0.185] | 1.37 | sin edge |
+| objGapFill | **pooled** | 769 | 54% | **+0.010** | [-0.045, +0.061] | 1.03 | sin edge |
+| EOD | 42 | 255 | 47% | -0.015 | [-0.126, +0.093] | 0.96 | sin edge |
+| EOD | 7 | 260 | 43% | -0.073 | [-0.166, +0.025] | 0.80 | sin edge |
+| EOD | 123 | 254 | 47% | +0.077 | [-0.034, +0.195] | 1.24 | sin edge |
+| EOD | **pooled** | 769 | 46% | **-0.004** | [-0.067, +0.061] | 0.99 | sin edge |
+
+Split cronológico (robustez temporal):
+
+| modo | tramo | ops | expectancy (R) | IC95 |
+|---|---|---:|---:|---|
+| objGapFill | train 60% | 461 | -0.003 | [-0.071, +0.064] |
+| objGapFill | test 40% | 308 | +0.028 | [-0.053, +0.110] |
+| EOD | train 60% | 461 | +0.001 | [-0.082, +0.084] |
+| EOD | test 40% | 308 | -0.012 | [-0.102, +0.087] |
+
+Con potencia de verdad (≈770 ops/modo), **el edge desaparece**: expectancy *pooled* +0,010 R
+(objGapFill) y −0,004 R (EOD), **pegada a cero**, IC95 cruzando el 0 en cada fold y en las dos
+mitades cronológicas. El acierto cae de 69–73% a 46–54%. **El +0,34 R del >3% era ruido de
+muestra pequeña (49 ops), confirmado.**
+
+**Veredicto Estrategia 2 (actualizado tras el re-test): NO hay edge. Nulo limpio.**
+- Lo que parecía "el ángulo menos muerto" era un espejismo de 49 operaciones. Con ~4,5 años y
+  ~770 operaciones por modo, el gap-fade de acciones da **expectancy ≈ 0**, estable en 3 folds
+  independientes y en un split train/test cronológico.
+- Queda un rastro **mínimo** de reversión (acierto 54% en objGapFill, PF 1,03) pero sin valor
+  esperado: las ganancias pequeñas las compensan los stops cuando el gap sigue corriendo. Nada
+  explotable. Puerta cerrada, ahora **con muestra grande**, no por falta de datos.
 
 ---
 
@@ -221,7 +254,7 @@ neto. 30 tickers × 15 días × 20 meses, ≈1.346 ticker-días/semilla.
 | estrategia | muestra | resultado | ¿edge robusto (IC95>0 en 3 semillas)? |
 |---|---|---|---|
 | **1. Lado corto (breakdown)** | ~450 ops/seed | EOD −0,09 R (IC95 cruza 0); trailing **PIERDE** | **NO** |
-| **2. Gap-fade (>3% / >2%)** | 10–54 ops/seed | acierto 55–73%, lean positivo que se diluye con más potencia | **NO** (sugerente, infra-potenciado) |
+| **2. Gap-fade** | **~770 ops/modo** (re-test 4,5 años, 6.891 eventos) | expectancy ≈ 0 (+0,01 / −0,00 R), estable en 3 folds y train/test | **NO — nulo limpio** |
 | **3. Mean-reversion VWAP (ETF+LC)** | ~1.300 ops/seed por lado | **PIERDE** robusto (−0,37 R, IC95 excluye 0, los 2 lados y 3 semillas) | **NO (pierde)** |
 | **4. Time-of-day** | ~1.346 días/seed | solo un momentum débil de última hora (+7,5 bps bruto, 2/3 semillas) | **NO** |
 
@@ -234,10 +267,10 @@ limpios point-in-time. Es información valiosa:
    extensión intradía **continúa**, no revierte. Puerta cerrada del todo.
 3. **No hay estructura horaria explotable** en acciones; el único rastro (continuación de
    última hora) es débil, bruto y no robusto, y contradice al de ETFs.
-4. El **gap-fade de acciones** es el único con perfil de reversión real (acierto alto, PF>1,
-   lean positivo), pero **sin potencia** para probarse: los gaps grandes son raros en nombres
-   líquidos. Es el único candidato que merecería re-test con más historia / universo que
-   gapee más — no para cablear hoy.
+4. El **gap-fade de acciones** parecía el único con perfil de reversión real, pero el re-test
+   con ~4,5 años (6.891 eventos vía prescreen; ~770 ops/modo) lo deja en **expectancy ≈ 0**:
+   el lean positivo del primer test era ruido de 49 operaciones. **Puerta cerrada, ahora con
+   muestra grande.** Ninguno de los cuatro queda como candidato.
 
 Esto **concuerda** con el mapa del repo: casi todo el intradía direccional muere en limpio.
 El único superviviente de toda la campaña Massive sigue siendo el **overnight de QQQ filtrado
@@ -246,10 +279,11 @@ limpio, por ahora, no da un edge nuevo robusto.
 
 ### Avisos honestos
 
-- **Muestras pequeñas a propósito** (la descarga de minuto es pesada): el veredicto de "no
-  edge" es sólido donde la muestra es grande (mean-reversion: >1.300 ops) y más tentativo
-  donde es pequeña (gap-fade >3%: 10–23 ops/semilla). Por eso el gap-fade queda como
-  "sugerente", no como "muerto".
+- **Muestras pequeñas a propósito** en el primer pase (la descarga de minuto es pesada), pero
+  los dos veredictos que importaban se zanjaron con muestra grande: mean-reversion (>1.300
+  ops/lado) y, tras el re-test, gap-fade (~770 ops/modo sobre 6.891 eventos de ~4,5 años, vía
+  prescreen diario barato). El prescreen (enumerar gaps con barras diarias GROUPED y bajar
+  minuto solo de los eventos) es la forma eficiente de dar potencia a un setup de eventos raros.
 - **Solo research/paper.** Nada de esto está cableado en vivo ni toca la operativa.
 - **Costes incluidos**: SLIP 4 bps/lado, SLIP_STOP 8 bps, borrow 3 bps en cortos. El
   time-of-day se reporta en bruto (y aún así no hay edge).
