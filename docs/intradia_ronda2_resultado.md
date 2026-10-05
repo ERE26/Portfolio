@@ -98,4 +98,81 @@ supervivencia) y del lado corto (que no tenía ni señal).
 
 ---
 
-<!-- SIGUIENTE: Familia 2 (compresión -> expansión) -->
+## Familia 2 — COMPRESIÓN → EXPANSIÓN · `backtest_compresion_massive.py`
+
+**Idea.** La hipótesis clásica de que una **expansión** de rango (breakout con continuación) es
+más probable DESPUÉS de una **compresión** de volatilidad (días de rango estrecho tipo NR7, o
+una apertura inusualmente tranquila). El ORB probaba el breakout SIN este filtro y murió (al
+quitar la supervivencia): aquí la pregunta es si **condicionar a compresión previa** le da
+edge. Largo **y** corto (simétrico).
+
+**Diseño (point-in-time, survivorship-free).** Universo PIT de acciones comunes del GROUPED del
+mes anterior (con deslistadas). Breakout **confirmado** del rango de apertura (primera media
+hora): entra al cierre de la vela que rompe (largo sobre el máximo, corto bajo el mínimo) +
+slippage; stop = extremo opuesto; salida EOD (+ variante trailing 2·ATR); coste de borrow en
+cortos. 3 semillas (42/7/123), ~500 breakouts/semilla, bootstrap IC95. Se comparan **tres
+cohortes sobre la MISMA muestra** para aislar el efecto de la compresión:
+- **BASELINE**: breakout en todos los días (sin filtro).
+- **NR7**: solo días cuya sesión previa fue la de rango más estrecho de las últimas 7 (filtro
+  PIT, usa solo el pasado).
+- **OR_TIGHT**: solo días cuyo rango de apertura (30 min) es <50% del ATR diario previo
+  (compresión intradía, medida en la mañana antes de la entrada).
+
+### Resultado (pooled de 3 semillas; cada cohorte también pierde o empata por semilla)
+
+| cohorte | modo | ops | acierto | expectancy (R) | IC95 | veredicto | vs baseline |
+|---|---|---:|---:|---:|---|---|---|
+| BASELINE | EOD | 1492 | 46% | −0.033 | [−0.073, +0.007] | sin edge (no robusto) | — |
+| BASELINE | EOD+trail | 1492 | 46% | −0.034 | [−0.073, +0.007] | sin edge (no robusto) | — |
+| **NR7** | EOD | 216 | 44% | **−0.121** | [−0.228, −0.022] | **PIERDE** | **−0.088R (NO mejora)** |
+| **NR7** | EOD+trail | 216 | 44% | **−0.121** | [−0.227, −0.022] | **PIERDE** | **−0.088R (NO mejora)** |
+| **OR_TIGHT** | EOD | 617 | 41% | **−0.100** | [−0.173, −0.025] | **PIERDE** | **−0.067R (NO mejora)** |
+| **OR_TIGHT** | EOD+trail | 617 | 43% | **−0.095** | [−0.165, −0.020] | **PIERDE** | **−0.061R (NO mejora)** |
+
+### Veredicto Familia 2: la compresión NO rescata el breakout — lo EMPEORA
+
+El breakout base ya no tiene edge (−0,03R, IC95 incluye el 0, no robusto). Y condicionar a
+compresión, lejos de ayudar, **lo empeora de forma consistente**: tanto NR7 como la apertura
+comprimida pierden (IC95 pooled excluye el 0 por abajo) y **no mejoran** al baseline en ninguna
+de las dos salidas. El trailing tampoco aporta. Es decir: **los breakouts que siguen a una
+compresión fallan MÁS**, no menos — contrario al refrán de "compresión precede expansión". Tiene
+lectura económica: un rango estrecho (NR7 / apertura tranquila) suele ser **falta de interés /
+día de chop**, y su "ruptura" es más a menudo un *head-fake* que revierte que un inicio de
+tendencia. Una vez quitada la supervivencia y puesto el coste, la expansión condicionada no
+aparece.
+
+---
+
+## Síntesis de la RONDA 2
+
+| familia (nueva) | señal bruta | neto de coste | veredicto |
+|---|---|---|---|
+| **Pairs / stat-arb intradía (ETF)** | **edge+ ROBUSTO** (+1,5 bp/op, 62%, IC95>0 en 3/3) | break-even-a-negativo (break-even ~1 bp/pata) | **edge REAL pero SUB-COSTE** → no operable |
+| **Compresión → expansión (acción PIT)** | sin edge; compresión lo empeora | pierde (−0,10/−0,12R) | **MUERE** (y desmiente el refrán) |
+
+**Las dos familias genuinamente nuevas de esta ronda no dan un edge intradía operable.** El
+pairs trading es el resultado más fino: **sí existe reversión intradía en el spread de ETFs
+emparejados** (robusta en las 3 semillas) — pero la anomalía ya está arbitrada hasta por debajo
+del coste de ejecutar cuatro patas, así que el neto es break-even-a-negativo. La
+compresión→expansión muere directamente y, de paso, deja un hallazgo honesto: tras quitar la
+supervivencia, los breakouts post-compresión fallan más, no menos.
+
+**Coherente con todo el estudio.** El mapa intradía se mantiene: el **único superviviente real
+sigue siendo el overnight de QQQ filtrado por tendencia** (`intradia_massive_resultado.md`), que
+**no es intradía** (opera de noche). De todo lo probado para operar DURANTE la sesión —
+momentum, pullback-VWAP, mean-reversion a VWAP, ORB largo y corto de acción, ORB de índice,
+última hora, gap-fade, gap-and-go, **pairs/stat-arb** y **compresión→expansión** — **ninguna
+familia entrega un edge robusto y neto de coste**. Es el resultado típico y honesto de la
+metodología LdP/Carver: casi ninguna idea sobrevive la validación limpia; cuando una señal real
+aparece (pairs), el coste se la come.
+
+### Avisos honestos
+
+1. **Un régimen (~2024–2026) de datos de minuto.** El plan de Massive sirve minuto desde
+   ~2023; no hay 5 años de intradía. Las conclusiones valen para este periodo.
+2. **Pairs:** el coste es el muro. Si alguien ejecutara a <1 bp/pata (market-maker, rebates),
+   el signo cambiaría; para un tomador de liquidez normal, no. Es sub-coste, no mágico.
+3. **Compresión:** se probaron 2 definiciones (NR7, apertura tight) × 2 salidas. Ninguna
+   mejora: no es cuestión de afinar el umbral, es que el efecto no está (o es adverso).
+4. **Solo research/paper.** Nada de esto se cablea en vivo.
+
