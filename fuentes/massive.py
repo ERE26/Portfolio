@@ -54,13 +54,13 @@ class ClienteMassive:
         self._ultima = 0.0
         self.llamadas = 0
 
-    def get(self, ruta, params=None):
+    def get(self, ruta, params=None, cache=True):
         url = ruta if ruta.startswith("http") else f"{BASE}{ruta}"
         espera = self.pausa_min - (time.time() - self._ultima)
         if espera > 0:
             time.sleep(espera)
         try:
-            return self.cli.get_json(url, params=params)
+            return self.cli.get_json(url, params=params, cache=cache)
         finally:
             self._ultima = time.time()
             self.llamadas += 1
@@ -81,6 +81,68 @@ def barras_diarias(ticker, desde, hasta, ajustado=True, cm=None):
                         "low": df["l"].values, "close": df["c"].values,
                         "volume": df["v"].values}, index=pd.DatetimeIndex(idx, name="fecha"))
     return out[~out.index.duplicated(keep="last")]
+
+
+_TF_MIN = {"1Min": 1, "5Min": 5, "15Min": 15, "1min": 1, "5min": 5, "15min": 15}
+
+
+def barras_intradia(ticker, tf, desde, hasta, ajustado=True, cm=None,
+                    solo_regular=True, max_paginas=200, cache=True):
+    """OHLCV intradia (barras de minuto agregadas) para un valor, con PAGINACION.
+
+    tf: '5Min' -> 5, '1Min' -> 1 (tambien '15Min'). El endpoint es
+    GET /v2/aggs/ticker/{t}/range/{mult}/minute/{from}/{to}. Se sigue next_url
+    hasta agotar (cada pagina trae hasta `limit` barras). El indice es datetime
+    convertido UTC->America/New_York y tz-naive; por defecto se FILTRA a horario
+    regular 09:30-16:00 (Massive sirve tambien premarket/afterhours). Columnas
+    open, high, low, close, volume. Mismo estilo defensivo que barras_diarias.
+    """
+    mult = _TF_MIN.get(tf)
+    if mult is None:
+        raise ValueError(f"tf no soportado: {tf!r} (usa '1Min'/'5Min'/'15Min')")
+    cm = cm or ClienteMassive()
+    ruta = f"/v2/aggs/ticker/{ticker}/range/{mult}/minute/{desde}/{hasta}"
+    params = {"adjusted": str(ajustado).lower(), "sort": "asc", "limit": 50000}
+    filas, d = [], cm.get(ruta, params, cache=cache)
+    for i in range(max_paginas):
+        filas += d.get("results") or []
+        nxt = d.get("next_url")
+        if not nxt or i == max_paginas - 1:
+            break
+        d = cm.get(nxt, cache=cache)  # next_url ya trae el cursor; la clave va en la cabecera
+    if not filas:
+        return pd.DataFrame(columns=COLUMNAS)
+    df = pd.DataFrame(filas)
+    idx = (pd.to_datetime(df["t"], unit="ms", utc=True)
+           .dt.tz_convert("America/New_York").dt.tz_localize(None))
+    out = pd.DataFrame({"open": df["o"].values, "high": df["h"].values,
+                        "low": df["l"].values, "close": df["c"].values,
+                        "volume": df["v"].values}, index=pd.DatetimeIndex(idx, name="fecha"))
+    out = out[~out.index.duplicated(keep="last")].sort_index()
+    if solo_regular:
+        t = out.index.time
+        import datetime as _dt
+        out = out[(t >= _dt.time(9, 30)) & (t < _dt.time(16, 0))]
+    return out
+
+
+def grouped_diario(fecha, ajustado=True, cm=None):
+    """TODAS las acciones US de un dia (1 llamada). Incluye los que ESE dia
+    cotizaban aunque hoy esten deslistados -> base para universo point-in-time
+    sin sesgo de supervivencia. GET /v2/aggs/grouped/locale/us/market/stocks/{d}.
+    Devuelve DataFrame con ticker, open, high, low, close, volume (vacio si el
+    plan no lo incluye o la fecha no es sesion). Lanza si la API devuelve error.
+    """
+    cm = cm or ClienteMassive()
+    d = cm.get(f"/v2/aggs/grouped/locale/us/market/stocks/{fecha}",
+               {"adjusted": str(ajustado).lower()})
+    res = d.get("results") or []
+    if not res:
+        return pd.DataFrame(columns=["ticker"] + COLUMNAS)
+    df = pd.DataFrame(res)
+    return pd.DataFrame({"ticker": df["T"].values, "open": df["o"].values,
+                         "high": df["h"].values, "low": df["l"].values,
+                         "close": df["c"].values, "volume": df["v"].values})
 
 
 def tickers_referencia(activos=True, paginas=1, limite=1000, cm=None, **filtros):
