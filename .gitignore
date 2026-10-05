@@ -39,6 +39,8 @@ datos/ensemble_eventos.csv
 datos/ensemble_eventos_lag1.csv
 datos/ensemble_smoke.csv
 datos/*.parquet
+datos/runners_seleccion.csv
+datos/_*.csv
 
 # zona de trabajo de la sesion (codigo con cache/credenciales en cabecera)
 scratchpad/
