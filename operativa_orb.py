@@ -10,7 +10,11 @@ backtest ganador):
     dentro de las primeras 2h. Bracket REALISTA: stop al mínimo del rango pero acotado al
     3% máx (más ceñido en rupturas ya extendidas) y take-profit a 2R (2× el riesgo).
   - Si no toca TP ni SL, se mantiene hasta el CIERRE (EOD): se cierran a <5 min del cierre.
-  - Sizing: riesgo fijo ORB_RIESGO del equity por trade; máx ORB_MAX simultáneas.
+  - Sizing (más volumen, Eduardo 2026-10-06): riesgo ORB_RIESGO (1%) por trade; máx ORB_MAX (15)
+    simultáneas; tope por nombre ORB_MAX_NOTIONAL (20%, <gate riesgo 25%).
+  - RE-ENTRADA al ganador: tras SALIR de un nombre, si hace un nuevo cierre de ruptura por encima
+    de la última entrada (+buffer), se re-entra (hasta MAX_REENTRADAS/nombre/día). Captura la cola
+    derecha (lo único con EV) sin quitar el TP 2R.
   - REGISTRA intención (cierre de la vela que confirma) vs fill real -> slippage, en
     datos/orb_paper.csv. Ese es el entregable de la Fase 0.
 
@@ -31,11 +35,21 @@ from fuentes import alpaca
 from fuentes import alpaca_trade as AT
 
 LOG = "datos/orb_paper.csv"
-ORB_RIESGO = 0.006        # 0,6% del equity en riesgo por trade (algo más de volumen)
-ORB_MAX = 10              # máx posiciones ORB simultáneas
-ORB_MAX_NOTIONAL = 0.12   # tope de exposición por nombre: 12% del equity (evita concentración)
+# Sizing MÁS AGRESIVO (petición Eduardo 2026-10-06: menos exigente con el tamaño, más volumen).
+# Enfocado con el análisis de hoy: la única firma real del ganador es la ruptura CONFIRMADA que
+# corre; subimos volumen en ESE motor (no en el momentum muerto). Topes bajo el gate de riesgo
+# (REDUCE si posición >25% equity), así que ORB_MAX_NOTIONAL se queda en 20%.
+ORB_RIESGO = 0.010        # 1,0% del equity en riesgo por trade (antes 0,6%: más tamaño)
+ORB_MAX = 15              # máx posiciones ORB simultáneas (antes 10: más volumen)
+ORB_MAX_NOTIONAL = 0.20   # tope de exposición por nombre: 20% del equity (antes 12%; <25% gate riesgo)
 VENTANA_MIN = 120         # solo entrar en las primeras 2h tras la apertura
 ORB_TP_R = 2.0            # take-profit a 2R (objetivo = 2× el riesgo). Antes: +20% fijo, irreal.
+# RE-ENTRADA al ganador en fuerza continuada (Eduardo: "si al vender sigue subiendo, re-comprar").
+# Tras SALIR de un nombre (posición cerrada), se permite re-entrar si hace un nuevo cierre de
+# ruptura por encima de la última entrada +buffer. Captura la cola derecha (lo único con EV) sin
+# quitar el TP (quitarlo era trampa de supervivencia, ver docs/refinamiento_intradia_2026-10-06.md).
+MAX_REENTRADAS = 3        # máx entradas por nombre y día (1 inicial + hasta 2 re-montas)
+REENTRADA_BUFFER = 0.002  # re-entrada exige nuevo cierre > última entrada +0,2% (sigue subiendo)
 CAMPOS = ["ts", "ticker", "or_high", "or_low", "intencion", "qty", "stop", "opening_rvol",
           "order_id", "fill", "slippage_pct", "salida", "pnl", "estado"]
 
@@ -64,9 +78,12 @@ def _guardar(df):
     df.to_csv(LOG, index=False)
 
 
-def _setup_orb(ticker):
+def _setup_orb(ticker, nivel_ref=None):
     """Devuelve el setup ORB del día para `ticker` o None. Point-in-time: usa solo velas
-    ya CERRADAS. RVOL de apertura con 14 días previos."""
+    ya CERRADAS. RVOL de apertura con 14 días previos.
+    nivel_ref=None (entrada inicial): intención = PRIMERA vela que cierra sobre el máx del rango.
+    nivel_ref=X (RE-ENTRADA): exige que la ÚLTIMA vela cerrada cierre sobre X (sigue subiendo) y
+      sobre el máx del rango; intención = ese cierre reciente (no el breakout inicial)."""
     hoy = _ahora_et().strftime("%Y-%m-%d")
     desde = (_ahora_et() - pd.Timedelta(days=28)).strftime("%Y-%m-%d")
     try:
@@ -95,11 +112,18 @@ def _setup_orb(ticker):
     orv = float(primeras.get(hoy_d, np.nan) / base.mean()) if base.mean() > 0 else np.nan
     if not (orv == orv) or orv < 1.0:
         return None
-    # ¿ha CERRADO ya una vela de hoy (posterior a la 1ª) por encima del máximo del rango?
-    for p in hoy_pos[1:]:
-        if float(df["close"].iloc[p]) > h0:
-            return {"or_high": h0, "or_low": l0, "opening_rvol": orv,
-                    "intencion": float(df["close"].iloc[p])}       # cierre que confirma
+    if nivel_ref is None:
+        # ENTRADA INICIAL: 1ª vela de hoy (posterior a la 1ª) que CIERRA sobre el máximo del rango.
+        for p in hoy_pos[1:]:
+            if float(df["close"].iloc[p]) > h0:
+                return {"or_high": h0, "or_low": l0, "opening_rvol": orv,
+                        "intencion": float(df["close"].iloc[p])}       # cierre que confirma
+        return None
+    # RE-ENTRADA: la ÚLTIMA vela cerrada debe cerrar sobre nivel_ref (sigue subiendo) y sobre el
+    # máximo del rango (tendencia intacta). Intención = ese cierre reciente, no el breakout inicial.
+    ult_close = float(df["close"].iloc[hoy_pos[-1]])
+    if ult_close > nivel_ref and ult_close > h0:
+        return {"or_high": h0, "or_low": l0, "opening_rvol": orv, "intencion": ult_close}
     return None
 
 
@@ -110,11 +134,14 @@ def ejecutar(confirmar=False):
         return
     df = _log()
     hoy = _ahora_et().strftime("%Y-%m-%d")
-    ya_hoy = set(df[(df["ts"].astype(str).str[:10] == hoy)]["ticker"]) if len(df) else set()
-    held = set(AT.posiciones())
-    abiertas_orb = set(df[df["estado"] == "abierta"]["ticker"]) if len(df) else set()
-    if len(abiertas_orb) >= ORB_MAX:
-        print(f"ORB: ya {len(abiertas_orb)} posiciones (máx {ORB_MAX}).")
+    hoy_rows = df[df["ts"].astype(str).str[:10] == hoy] if len(df) else df.iloc[0:0]
+    held = set(AT.posiciones())                    # posiciones REALES (fuente de verdad de "aún lo tengo")
+    # Lotes ORB GENUINAMENTE abiertos = fila 'abierta' en el log Y todavía en cartera. Un 'abierta'
+    # del log que ya NO está en held salió por TP/SL intradía -> cuenta como cerrado (re-entrable).
+    abiertas_log = set(df[df["estado"] == "abierta"]["ticker"]) if len(df) else set()
+    orb_vivas = abiertas_log & held
+    if len(orb_vivas) >= ORB_MAX:
+        print(f"ORB: ya {len(orb_vivas)} posiciones vivas (máx {ORB_MAX}).")
         return
     try:
         from fuentes import tradingview as TV
@@ -124,12 +151,26 @@ def ejecutar(confirmar=False):
     equity = float(AT.cuenta().get("equity", 0.0))
     nuevos = []
     for t in pool:
-        if t in held or t in ya_hoy or t in abiertas_orb:
+        if t in held:                              # aún lo tenemos (ORB u otro libro) -> no duplicar
             continue
-        s = _setup_orb(t)
+        # entradas ORB REALES de hoy en este nombre (abierta/cerrada), para el tope y la fuerza
+        t_ok = hoy_rows[(hoy_rows["ticker"] == t) & (hoy_rows["estado"].isin(["abierta", "cerrada"]))]
+        n_prev = len(t_ok)                         # 0 = primera entrada; >0 = re-entrada
+        if n_prev >= MAX_REENTRADAS:               # tope de re-entradas por nombre/día
+            continue
+        if n_prev == 0:                            # ENTRADA INICIAL: breakout confirmado del día
+            s = _setup_orb(t)
+        else:                                      # RE-ENTRADA: nuevo cierre sobre la última entrada
+            try:
+                max_prev = float(t_ok["intencion"].astype(float).max())
+            except Exception:
+                max_prev = 0.0
+            s = _setup_orb(t, nivel_ref=max_prev * (1 + REENTRADA_BUFFER))
         if s is None:
             continue
         entry = s["intencion"]
+        if n_prev > 0:
+            print(f"  (re-entrada #{n_prev+1} {t}: cierre {entry:.2f} > última {max_prev:.2f})")
         rdist_raw = entry - s["or_low"]            # riesgo natural: stop en el mínimo del rango
         if rdist_raw <= 0:
             continue
@@ -155,7 +196,7 @@ def ejecutar(confirmar=False):
         else:
             print(f"  [dry] ORB {t} x{qty} @~{entry:.2f} stop {sl:.2f} RVOL_ap {s['opening_rvol']:.1f}")
         nuevos.append(fila)
-        if len(abiertas_orb) + len(nuevos) >= ORB_MAX:
+        if len(orb_vivas) + len(nuevos) >= ORB_MAX:
             break
     if nuevos:
         _guardar(pd.concat([df, pd.DataFrame(nuevos)], ignore_index=True))
