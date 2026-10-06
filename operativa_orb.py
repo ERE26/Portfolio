@@ -7,7 +7,7 @@ backtest ganador):
   - Rango de apertura = 1ª vela de 5 min (09:30-09:35 ET). 1ª vela ALCISTA + RVOL de
     apertura > 1 (vol 1ª vela 5m / media 14 días).
   - Entrada: cuando una vela de 5m CIERRA sobre el máximo del rango (ruptura CONFIRMADA),
-    dentro de las primeras 2h. Bracket REALISTA: stop al mínimo del rango pero acotado al
+    dentro de las primeras 4h. Bracket REALISTA: stop al mínimo del rango pero acotado al
     3% máx (más ceñido en rupturas ya extendidas) y take-profit a 2R (2× el riesgo).
   - Si no toca TP ni SL, se mantiene hasta el CIERRE (EOD): se cierran a <5 min del cierre.
   - Sizing (más volumen, Eduardo 2026-10-06): riesgo ORB_RIESGO (1%) por trade; máx ORB_MAX (15)
@@ -40,15 +40,18 @@ LOG = "datos/orb_paper.csv"
 # corre; subimos volumen en ESE motor (no en el momentum muerto). Topes bajo el gate de riesgo
 # (REDUCE si posición >25% equity), así que ORB_MAX_NOTIONAL se queda en 20%.
 ORB_RIESGO = 0.010        # 1,0% del equity en riesgo por trade (antes 0,6%: más tamaño)
-ORB_MAX = 15              # máx posiciones ORB simultáneas (antes 10: más volumen)
+ORB_MAX = 20              # máx posiciones ORB simultáneas (antes 10->15->20: MÁS VOLUMEN)
 ORB_MAX_NOTIONAL = 0.20   # tope de exposición por nombre: 20% del equity (antes 12%; <25% gate riesgo)
-VENTANA_MIN = 120         # solo entrar en las primeras 2h tras la apertura
+VENTANA_MIN = 240         # entrar en las primeras 4h tras la apertura (antes 2h: más volumen)
+POOL_N = 120              # nombres in-play escaneados (antes 60: más candidatos, más volumen)
+RVOL_MIN = 0.8            # RVOL apertura mínimo (antes 1,0). El research 2026-10-06 mostró que el
+                          # rvol NO separa ganadores (AUC 0,53) -> relajarlo añade volumen sin coste de edge.
 ORB_TP_R = 2.0            # take-profit a 2R (objetivo = 2× el riesgo). Antes: +20% fijo, irreal.
 # RE-ENTRADA al ganador en fuerza continuada (Eduardo: "si al vender sigue subiendo, re-comprar").
 # Tras SALIR de un nombre (posición cerrada), se permite re-entrar si hace un nuevo cierre de
 # ruptura por encima de la última entrada +buffer. Captura la cola derecha (lo único con EV) sin
 # quitar el TP (quitarlo era trampa de supervivencia, ver docs/refinamiento_intradia_2026-10-06.md).
-MAX_REENTRADAS = 3        # máx entradas por nombre y día (1 inicial + hasta 2 re-montas)
+MAX_REENTRADAS = 4        # máx entradas por nombre y día (1 inicial + hasta 3 re-montas: más volumen)
 REENTRADA_BUFFER = 0.002  # re-entrada exige nuevo cierre > última entrada +0,2% (sigue subiendo)
 CAMPOS = ["ts", "ticker", "or_high", "or_low", "intencion", "qty", "stop", "opening_rvol",
           "order_id", "fill", "slippage_pct", "salida", "pnl", "estado"]
@@ -110,7 +113,7 @@ def _setup_orb(ticker, nivel_ref=None):
     if len(base) < 5:
         return None
     orv = float(primeras.get(hoy_d, np.nan) / base.mean()) if base.mean() > 0 else np.nan
-    if not (orv == orv) or orv < 1.0:
+    if not (orv == orv) or orv < RVOL_MIN:
         return None
     if nivel_ref is None:
         # ENTRADA INICIAL: 1ª vela de hoy (posterior a la 1ª) que CIERRA sobre el máximo del rango.
@@ -145,7 +148,7 @@ def ejecutar(confirmar=False):
         return
     try:
         from fuentes import tradingview as TV
-        pool = TV.en_juego(n=60)
+        pool = TV.en_juego(n=POOL_N)
     except Exception as e:
         print(f"ORB: sin pool in-play ({str(e)[:50]})"); return
     equity = float(AT.cuenta().get("equity", 0.0))
