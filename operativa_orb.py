@@ -39,9 +39,10 @@ LOG = "datos/orb_paper.csv"
 # Enfocado con el análisis de hoy: la única firma real del ganador es la ruptura CONFIRMADA que
 # corre; subimos volumen en ESE motor (no en el momentum muerto). Topes bajo el gate de riesgo
 # (REDUCE si posición >25% equity), así que ORB_MAX_NOTIONAL se queda en 20%.
-ORB_RIESGO = 0.010        # 1,0% del equity en riesgo por trade (antes 0,6%: más tamaño)
-ORB_MAX = 20              # máx posiciones ORB simultáneas (antes 10->15->20: MÁS VOLUMEN)
-ORB_MAX_NOTIONAL = 0.20   # tope de exposición por nombre: 20% del equity (antes 12%; <25% gate riesgo)
+ORB_RIESGO = 0.005        # 0,5% del equity en riesgo por trade. MUCHAS transacciones pequeñas (Eduardo):
+                          # tamaño pequeño por trade -> caben MÁS operaciones dentro del buying power.
+ORB_MAX = 20              # máx posiciones ORB simultáneas
+ORB_MAX_NOTIONAL = 0.06   # tope por nombre 6% del equity (antes 20%): trades pequeños, más volumen de ops
 VENTANA_MIN = 240         # entrar en las primeras 4h tras la apertura (antes 2h: más volumen)
 POOL_N = 400              # nombres in-play en el pool (antes 60->120->400: MUCHO MÁS POOL, Eduardo)
 POOL_RVOL_MIN = 0.0       # RVOL (TradingView) del pool DESACTIVADO: el relative_volume es acumulado del
@@ -164,7 +165,11 @@ def ejecutar(confirmar=False):
         off = (int(max(_min_desde_apertura(), 0)) // 2 * MAX_SCAN) % len(pool)
         pool = pool[off:] + pool[:off]
     print(f"ORB: pool {len(pool)} in-play; escaneo hasta {MAX_SCAN} (rotando).")
-    equity = float(AT.cuenta().get("equity", 0.0))
+    cta = AT.cuenta()
+    equity = float(cta.get("equity", 0.0))
+    bp_rest = float(cta.get("buying_power", 0.0))   # se va descontando por cada entrada enviada
+    if confirmar and bp_rest < 500:                 # sin margen util -> no insistir (evita 403)
+        print(f"ORB: sin buying power (\${bp_rest:,.0f}); no entro este tick."); return
     nuevos = []
     escaneados = 0
     for t in pool:
@@ -201,18 +206,35 @@ def ejecutar(confirmar=False):
         rdist = entry - sl                          # riesgo real por acción tras acotar el stop
         qty = int((equity * ORB_RIESGO) / rdist) if rdist > 0 else 0
         qty = min(qty, int((equity * ORB_MAX_NOTIONAL) / entry))   # tope de exposición por nombre
+        if confirmar:
+            qty = min(qty, int(bp_rest / entry) if entry > 0 else 0)  # no exceder buying power (cero 403)
         if qty <= 0:
+            if confirmar and bp_rest < entry:      # ya no cabe ni 1 acción barata -> paramos
+                break
             continue
         fila = {"ts": _ahora_et().isoformat(), "ticker": t, "or_high": s["or_high"],
                 "or_low": s["or_low"], "intencion": entry, "qty": qty, "stop": sl,
                 "opening_rvol": round(s["opening_rvol"], 2), "order_id": "", "fill": np.nan,
                 "slippage_pct": np.nan, "salida": np.nan, "pnl": np.nan, "estado": "pend"}
         if confirmar:
-            r = AT.enviar_bracket(t, qty, tp, sl, confirmar=True, libro="orb")
-            fila["order_id"] = r.get("id", "")
-            fila["estado"] = "abierta" if r.get("id") else "error"
+            sin_bp = False
+            try:
+                r = AT.enviar_bracket(t, qty, tp, sl, confirmar=True, libro="orb")
+                fila["order_id"] = r.get("id", "")
+                fila["estado"] = "abierta" if r.get("id") else "error"
+                msg = fila["estado"]
+            except Exception as e:
+                # un rechazo (403 buying power, wash-trade, etc.) NO debe tumbar la ronda.
+                fila["estado"] = "error"
+                msg = f"rechazada ({str(e)[:50]})"
+                sin_bp = "403" in str(e)       # forbidden = buying power agotado tipicamente
             print(f"  ORB LARGO {t} x{qty} @~{entry:.2f} (rango {s['or_low']:.2f}-{s['or_high']:.2f}, "
-                  f"RVOL_ap {s['opening_rvol']:.1f})  -> {fila['estado']}")
+                  f"RVOL_ap {s['opening_rvol']:.1f})  -> {msg}")
+            if sin_bp:                          # sin buying power: registra y PARA (no insistas este tick)
+                nuevos.append(fila)
+                break
+            if fila["estado"] == "abierta":
+                bp_rest -= qty * entry          # descuenta el margen usado para la próxima entrada
         else:
             print(f"  [dry] ORB {t} x{qty} @~{entry:.2f} stop {sl:.2f} RVOL_ap {s['opening_rvol']:.1f}")
         nuevos.append(fila)
