@@ -193,23 +193,30 @@ def ejecutar(confirmar=False):
             s = _setup_orb(t, nivel_ref=max_prev * (1 + REENTRADA_BUFFER))
         if s is None:
             continue
-        entry = s["intencion"]
+        entry = s["intencion"]                     # cierre que confirma (se registra para medir slippage)
         if n_prev > 0:
             print(f"  (re-entrada #{n_prev+1} {t}: cierre {entry:.2f} > última {max_prev:.2f})")
-        rdist_raw = entry - s["or_low"]            # riesgo natural: stop en el mínimo del rango
+        # La orden es a MERCADO: se llena al precio ACTUAL, no a la intención. Anclamos el bracket
+        # (y el tamaño) al precio actual para que TP/SL bracketeen el fill (si no -> 422 invalido).
+        try:
+            px = float(AT.precio_actual([t]).get(t, entry) or entry)
+        except Exception:
+            px = entry
+        if px <= 0 or px < s["or_low"]:            # sin precio o ya por debajo del rango -> no entro
+            continue
+        rdist_raw = px - s["or_low"]               # riesgo natural: stop en el mínimo del rango
         if rdist_raw <= 0:
             continue
-        # TP/SL realistas: stop acotado al 3% máx (AT.INTRADIA_SL_MAX) y objetivo a 2R. En
-        # rupturas muy extendidas el mínimo del rango queda lejísimos -> stop más ceñido para
-        # que el riesgo (y el TP) sean realistas, en vez de un objetivo del 15-20%.
-        tp, sl = AT.niveles_bracket(entry, rdist_raw / entry, r_mult=ORB_TP_R, lado="buy")
-        rdist = entry - sl                          # riesgo real por acción tras acotar el stop
+        # TP/SL realistas anclados al precio actual: stop acotado al 3% máx (AT.INTRADIA_SL_MAX) y
+        # objetivo a 2R. En rupturas muy extendidas el mínimo del rango queda lejos -> stop más ceñido.
+        tp, sl = AT.niveles_bracket(px, rdist_raw / px, r_mult=ORB_TP_R, lado="buy")
+        rdist = px - sl                             # riesgo real por acción tras acotar el stop
         qty = int((equity * ORB_RIESGO) / rdist) if rdist > 0 else 0
-        qty = min(qty, int((equity * ORB_MAX_NOTIONAL) / entry))   # tope de exposición por nombre
+        qty = min(qty, int((equity * ORB_MAX_NOTIONAL) / px))     # tope de exposición por nombre
         if confirmar:
-            qty = min(qty, int(bp_rest / entry) if entry > 0 else 0)  # no exceder buying power (cero 403)
+            qty = min(qty, int(bp_rest / px) if px > 0 else 0)    # no exceder buying power (cero 403)
         if qty <= 0:
-            if confirmar and bp_rest < entry:      # ya no cabe ni 1 acción barata -> paramos
+            if confirmar and bp_rest < px:         # ya no cabe ni 1 acción -> paramos
                 break
             continue
         fila = {"ts": _ahora_et().isoformat(), "ticker": t, "or_high": s["or_high"],
@@ -234,7 +241,7 @@ def ejecutar(confirmar=False):
                 nuevos.append(fila)
                 break
             if fila["estado"] == "abierta":
-                bp_rest -= qty * entry          # descuenta el margen usado para la próxima entrada
+                bp_rest -= qty * px             # descuenta el margen usado para la próxima entrada
         else:
             print(f"  [dry] ORB {t} x{qty} @~{entry:.2f} stop {sl:.2f} RVOL_ap {s['opening_rvol']:.1f}")
         nuevos.append(fila)
