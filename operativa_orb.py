@@ -43,9 +43,13 @@ ORB_RIESGO = 0.010        # 1,0% del equity en riesgo por trade (antes 0,6%: má
 ORB_MAX = 20              # máx posiciones ORB simultáneas (antes 10->15->20: MÁS VOLUMEN)
 ORB_MAX_NOTIONAL = 0.20   # tope de exposición por nombre: 20% del equity (antes 12%; <25% gate riesgo)
 VENTANA_MIN = 240         # entrar en las primeras 4h tras la apertura (antes 2h: más volumen)
-POOL_N = 120              # nombres in-play escaneados (antes 60: más candidatos, más volumen)
-RVOL_MIN = 0.8            # RVOL apertura mínimo (antes 1,0). El research 2026-10-06 mostró que el
-                          # rvol NO separa ganadores (AUC 0,53) -> relajarlo añade volumen sin coste de edge.
+POOL_N = 400              # nombres in-play en el pool (antes 60->120->400: MUCHO MÁS POOL, Eduardo)
+POOL_RVOL_MIN = 0.5       # RVOL (TradingView) mínimo del pool (antes 1,1 interno): universo MUCHO más ancho
+MAX_SCAN = 50             # máx evaluaciones _setup_orb por tick (~0,84s/nombre => ~42s; el tick es 2 min y
+                          # lleva más libros). El pool se escanea ROTANDO el inicio cada tick -> se cubre
+                          # entero cada ~8 ticks (~16 min); los breakouts confirmados persisten, no se pierden.
+RVOL_MIN = 0.8            # RVOL apertura mínimo del gate propio del ORB (barras Alpaca; distinto del pool).
+                          # Antes 1,0: el research 2026-10-06 mostró que el rvol NO separa ganadores (AUC 0,53).
 ORB_TP_R = 2.0            # take-profit a 2R (objetivo = 2× el riesgo). Antes: +20% fijo, irreal.
 # RE-ENTRADA al ganador en fuerza continuada (Eduardo: "si al vender sigue subiendo, re-comprar").
 # Tras SALIR de un nombre (posición cerrada), se permite re-entrar si hace un nuevo cierre de
@@ -148,12 +152,21 @@ def ejecutar(confirmar=False):
         return
     try:
         from fuentes import tradingview as TV
-        pool = TV.en_juego(n=POOL_N)
+        pool = TV.en_juego(n=POOL_N, min_rvol=POOL_RVOL_MIN)
     except Exception as e:
         print(f"ORB: sin pool in-play ({str(e)[:50]})"); return
+    # Pool grande: ROTAR el inicio del escaneo cada tick (2 min) para cubrirlo entero a lo largo
+    # del día sin exceder MAX_SCAN fetches por tick (cada _setup_orb baja histórico 5m: caro).
+    if pool:
+        off = (int(max(_min_desde_apertura(), 0)) // 2 * MAX_SCAN) % len(pool)
+        pool = pool[off:] + pool[:off]
+    print(f"ORB: pool {len(pool)} in-play; escaneo hasta {MAX_SCAN} (rotando).")
     equity = float(AT.cuenta().get("equity", 0.0))
     nuevos = []
+    escaneados = 0
     for t in pool:
+        if escaneados >= MAX_SCAN:                 # tope de fetches por tick (resto en el próximo)
+            break
         if t in held:                              # aún lo tenemos (ORB u otro libro) -> no duplicar
             continue
         # entradas ORB REALES de hoy en este nombre (abierta/cerrada), para el tope y la fuerza
@@ -161,6 +174,7 @@ def ejecutar(confirmar=False):
         n_prev = len(t_ok)                         # 0 = primera entrada; >0 = re-entrada
         if n_prev >= MAX_REENTRADAS:               # tope de re-entradas por nombre/día
             continue
+        escaneados += 1                            # cuenta la evaluación CARA (fetch de histórico)
         if n_prev == 0:                            # ENTRADA INICIAL: breakout confirmado del día
             s = _setup_orb(t)
         else:                                      # RE-ENTRADA: nuevo cierre sobre la última entrada
