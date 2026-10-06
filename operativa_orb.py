@@ -41,7 +41,10 @@ LOG = "datos/orb_paper.csv"
 # (REDUCE si posición >25% equity), así que ORB_MAX_NOTIONAL se queda en 20%.
 ORB_RIESGO = 0.005        # 0,5% del equity en riesgo por trade. MUCHAS transacciones pequeñas (Eduardo):
                           # tamaño pequeño por trade -> caben MÁS operaciones dentro del buying power.
-ORB_MAX = 20              # máx posiciones ORB simultáneas
+ORB_MAX = 40              # máx posiciones ORB simultáneas (antes 20: MÁS VOLUMEN, Eduardo). El límite
+                          # real lo pone el buying power (sizing = min(riesgo, notional, bp_rest/px)): el
+                          # pool (400) y el cap 20 ya NO eran el cuello de botella -> se saturaba en 20 con
+                          # BP libre. Subido a 40 para dejar que el volumen crezca hasta agotar el BP.
 ORB_MAX_NOTIONAL = 0.06   # tope por nombre 6% del equity (antes 20%): trades pequeños, más volumen de ops
 VENTANA_MIN = 240         # entrar en las primeras 4h tras la apertura (antes 2h: más volumen)
 POOL_N = 400              # nombres in-play en el pool (antes 60->120->400: MUCHO MÁS POOL, Eduardo)
