@@ -44,7 +44,10 @@ ORB_MAX = 20              # máx posiciones ORB simultáneas (antes 10->15->20: 
 ORB_MAX_NOTIONAL = 0.20   # tope de exposición por nombre: 20% del equity (antes 12%; <25% gate riesgo)
 VENTANA_MIN = 240         # entrar en las primeras 4h tras la apertura (antes 2h: más volumen)
 POOL_N = 400              # nombres in-play en el pool (antes 60->120->400: MUCHO MÁS POOL, Eduardo)
-POOL_RVOL_MIN = 0.5       # RVOL (TradingView) mínimo del pool (antes 1,1 interno): universo MUCHO más ancho
+POOL_RVOL_MIN = 0.0       # RVOL (TradingView) del pool DESACTIVADO: el relative_volume es acumulado del
+                          # día y temprano es bajísimo (colapsaba el pool a ~6). El gate de calidad lo hace
+                          # el opening-rvol propio del ORB (RVOL_MIN, barras Alpaca). Así el pool es grande y estable.
+POOL_MIN_CHANGE = -3.0    # admite nombres hasta -3% en el día (aún pueden romper el rango al alza): más pool
 MAX_SCAN = 50             # máx evaluaciones _setup_orb por tick (~0,84s/nombre => ~42s; el tick es 2 min y
                           # lleva más libros). El pool se escanea ROTANDO el inicio cada tick -> se cubre
                           # entero cada ~8 ticks (~16 min); los breakouts confirmados persisten, no se pierden.
@@ -152,7 +155,7 @@ def ejecutar(confirmar=False):
         return
     try:
         from fuentes import tradingview as TV
-        pool = TV.en_juego(n=POOL_N, min_rvol=POOL_RVOL_MIN)
+        pool = TV.en_juego(n=POOL_N, min_rvol=POOL_RVOL_MIN, min_change=POOL_MIN_CHANGE)
     except Exception as e:
         print(f"ORB: sin pool in-play ({str(e)[:50]})"); return
     # Pool grande: ROTAR el inicio del escaneo cada tick (2 min) para cubrirlo entero a lo largo

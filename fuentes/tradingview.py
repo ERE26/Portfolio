@@ -63,7 +63,7 @@ MAX_CAP_INTRADIA = 20_000_000_000.0     # $20B
 
 
 def en_juego(n=120, min_precio=4.0, min_dvol=4_000_000.0, min_avgvol=400_000.0, min_rvol=1.1,
-             max_cap=MAX_CAP_INTRADIA):
+             max_cap=MAX_CAP_INTRADIA, min_change=0.0):
     """Acciones US LÍQUIDAS que están EN JUEGO ahora (RVOL alto y subiendo hoy), de TODO
     el mercado, en una sola llamada. Es el POOL DE CANDIDATOS intradía: en vez de iterar
     una lista fija de ~114, se evalúan los que de verdad se mueven hoy (sean los de
@@ -76,7 +76,7 @@ def en_juego(n=120, min_precio=4.0, min_dvol=4_000_000.0, min_avgvol=400_000.0, 
         {"left": "Value.Traded", "operation": "greater", "right": min_dvol},
         {"left": "average_volume_10d_calc", "operation": "greater", "right": min_avgvol},
         {"left": "relative_volume_10d_calc", "operation": "greater", "right": min_rvol},
-        {"left": "change", "operation": "greater", "right": 0},
+        {"left": "change", "operation": "greater", "right": min_change},
         {"left": "type", "operation": "equal", "right": "stock"},
         {"left": "is_primary", "operation": "equal", "right": True},
     ]
