@@ -4,24 +4,17 @@ Edge (docs/intradia_massive_resultado.md): la prima de la renta variable se gana
 DE NOCHE (close->open); el intradía aporta poco. Operamos solo la noche y solo en tendencia:
   - Universo: QQQ (núcleo) + SPY, IWM (cesta de diversificación overnight).
   - Señal diaria (al cierre): si el ÚLTIMO cierre > SMA200 -> mantener la noche; si no, efectivo.
-  - Entrada: orden de MERCADO pegada al cierre (~15:55-15:59 ET). Salida: MERCADO en la apertura (~09:30-09:40 ET).
+  - Entrada: market-on-close (MOC, tif='cls') al cierre.  Salida: market-on-open (MOO, tif='opg').
   - Sin apalancar. Exposición SOLO overnight y SOLO en tendencia alcista.
 Backtest limpio (5 años Massive, sin supervivencia): QQQ Sharpe ~1,3 (IC95 [0,25,2,43], train≈test),
 tolerante a coste hasta ~1,5 bp/lado. SPY/IWM sugerentes (IC95 incluye 0) -> cesta, no sueltos.
 
-EJECUCIÓN (fix 2026-10-06, autorizado por Eduardo): Alpaca PAPER NO ejecuta las subastas MOC
-('cls') / MOO ('opg') -> las órdenes EXPIRAN sin llenar (verificado 2026-10-05, 3 entradas
-expiradas). Para medir de verdad la prima overnight en paper se usan órdenes de MERCADO ('day')
-pegadas al cierre y a la apertura. El fill real incluye el medio-spread + la deriva de esos
-minutos: ese es exactamente el slippage que este experimento mide (overnight_ret vía fills).
-Reversible con las constantes TIF_ENTRADA / TIF_SALIDA.
+OBJETIVO DE ESTE PASO (igual que la Fase 0 del ORB): PAPER para medir el SLIPPAGE REAL de las
+subastas MOC/MOO (intención = cierre de hoy vs fill real), que es el muro de esta estrategia.
+NO toca el resto del sistema. PAPER siempre (claves PK).
 
-OBJETIVO DE ESTE PASO (igual que la Fase 0 del ORB): PAPER para medir el SLIPPAGE REAL de la
-ejecución (intención cerca del cierre vs fill real; overnight_ret real close->open), que es el
-muro de esta estrategia. NO toca el resto del sistema. PAPER siempre (claves PK).
-
-  python operativa_overnight.py --entrar [--enviar]      # pegado al cierre (~15:55-15:59 ET): MKT buy
-  python operativa_overnight.py --salir  [--enviar]      # en la apertura (~09:30-09:40 ET): MKT sell
+  python operativa_overnight.py --entrar [--enviar]      # al cierre (~15:45-15:58 ET): MOC buy
+  python operativa_overnight.py --salir  [--enviar]      # en apertura (pre 09:28 ET): MOO sell
   python operativa_overnight.py --reconciliar            # rellena fills, overnight return y slippage
 Sin --enviar = dry-run (no manda órdenes).
 """
@@ -44,11 +37,6 @@ SMA_N = 200                            # filtro de tendencia
 # el lote que compró el overnight, leído del log; nunca "toda la posición"). Para desplegar a
 # tamaño completo habría que aislarlo en una cuenta paper separada.
 NOTIONAL = 1000.0                      # $ por nombre (sonda de medición, interferencia mínima)
-# TIF de ejecución. Alpaca PAPER no ejecuta 'cls' (MOC) ni 'opg' (MOO): expiran sin llenar.
-# Usamos MERCADO ('day') pegado al cierre/apertura para que SÍ se ejecute y poder medir el
-# overnight real. Si algún día se opera en una cuenta que sí ejecute subastas, volver a 'cls'/'opg'.
-TIF_ENTRADA = "day"                    # entrada: market pegado al cierre (~15:55-15:59 ET)
-TIF_SALIDA = "day"                     # salida: market en la apertura (~09:30-09:40 ET)
 CAMPOS = ["ts", "fecha", "ticker", "etapa", "lado", "tif", "qty", "ref_close", "sma200",
           "order_id", "fill", "slippage_pct", "overnight_ret", "estado"]
 
@@ -105,11 +93,8 @@ def entrar(confirmar=False):
     overnight propio si ya hay uno abierto o ya se entró hoy."""
     et = _ahora_et()
     print(f"OVERNIGHT entrar | {et:%Y-%m-%d %H:%M} ET")
-    # GATE DURO: solo envía pegado al cierre (~15:50-15:59 ET lun-vie). Fuera de ventana con
-    # --enviar NO manda (espera al tick de cierre); el dry-run sí informa a cualquier hora.
-    if confirmar and not (et.weekday() < 5 and et.hour == 15 and et.minute >= 50):
-        print("  fuera de la ventana de cierre (~15:50-15:59 ET); no envío, espero a pegarme al cierre.")
-        return
+    if confirmar and not (et.weekday() < 5 and (et.hour == 15 and et.minute >= 40)):
+        print("  AVISO: fuera de la ventana MOC (~15:40-15:59 ET lun-vie); Alpaca puede rechazar 'cls'.")
     df = _log()
     hoy = et.strftime("%Y-%m-%d")
     abiertas = _abiertas_overnight(df)
@@ -126,27 +111,20 @@ def entrar(confirmar=False):
         en_tend, ult, sma = s
         if not en_tend:
             print(f"  {t}: cierre {ult:.2f} < SMA200 {sma:.2f} -> EFECTIVO (no entro)"); continue
-        # precio en vivo al enviar (pegado al cierre): referencia honesta de slippage y tamaño
-        try:
-            px = float(AT.precio_actual([t]).get(t, ult) or ult)
-        except Exception:
-            px = ult
-        if px <= 0:
-            px = ult
-        qty = int(NOTIONAL / px) if px > 0 else 0
+        qty = int(NOTIONAL / ult) if ult > 0 else 0
         if qty <= 0:
             print(f"  {t}: qty 0"); continue
         fila = {"ts": et.isoformat(), "fecha": hoy, "ticker": t, "etapa": "entrada",
-                "lado": "buy", "tif": TIF_ENTRADA, "qty": qty, "ref_close": round(px, 2),
+                "lado": "buy", "tif": "cls", "qty": qty, "ref_close": round(ult, 2),
                 "sma200": round(sma, 2), "order_id": "", "fill": np.nan,
                 "slippage_pct": np.nan, "overnight_ret": np.nan, "estado": "pend"}
         if confirmar:
-            r = AT.enviar_orden(t, qty, "buy", confirmar=True, tif=TIF_ENTRADA, libro="overnight")
+            r = AT.enviar_orden(t, qty, "buy", confirmar=True, tif="cls", libro="overnight")
             fila["order_id"] = r.get("id", "")
             fila["estado"] = "enviada" if r.get("id") else "error"
-            print(f"  MKT BUY (cierre) {t} x{qty} @~{px:.2f} (SMA200 {sma:.2f}) -> {fila['estado']}")
+            print(f"  MOC BUY {t} x{qty} @~{ult:.2f} (SMA200 {sma:.2f}) -> {fila['estado']}")
         else:
-            print(f"  [dry] MKT BUY (cierre) {t} x{qty} @~{px:.2f} (cierre>{sma:.2f} SMA200)")
+            print(f"  [dry] MOC BUY {t} x{qty} @~{ult:.2f} (cierre>{sma:.2f} SMA200)")
         nuevos.append(fila)
     if confirmar and nuevos:          # el dry-run NO persiste (solo informa)
         _guardar(pd.concat([df, pd.DataFrame(nuevos)], ignore_index=True))
@@ -158,12 +136,8 @@ def salir(confirmar=False):
     """En la apertura: MOO sell de todo lo que mantengamos del libro overnight."""
     et = _ahora_et()
     print(f"OVERNIGHT salir | {et:%Y-%m-%d %H:%M} ET")
-    # GATE DURO: solo envía en la apertura (~09:30-10:00 ET lun-vie). Fuera de ventana con
-    # --enviar NO manda (espera al tick de apertura); el dry-run sí informa a cualquier hora.
-    en_ventana = et.weekday() < 5 and ((et.hour == 9 and et.minute >= 30) or et.hour == 10)
-    if confirmar and not en_ventana:
-        print("  fuera de la ventana de apertura (~09:30-10:00 ET); no envío, espero a la apertura.")
-        return
+    if confirmar and not (et.weekday() < 5 and et.hour < 9 or (et.hour == 9 and et.minute <= 27)):
+        print("  AVISO: fuera de la ventana MOO (pre 09:28 ET); Alpaca puede rechazar 'opg'.")
     df = _log()
     abiertas = _abiertas_overnight(df)          # solo el lote propio del overnight, NO la posición total
     if not abiertas:
@@ -176,16 +150,16 @@ def salir(confirmar=False):
     for t, qty in abiertas.items():
         et_iso = et.isoformat()
         fila = {"ts": et_iso, "fecha": et.strftime("%Y-%m-%d"), "ticker": t, "etapa": "salida",
-                "lado": "sell", "tif": TIF_SALIDA, "qty": qty, "ref_close": (pos.get(t, {}) or {}).get("precio"),
+                "lado": "sell", "tif": "opg", "qty": qty, "ref_close": (pos.get(t, {}) or {}).get("precio"),
                 "sma200": np.nan, "order_id": "", "fill": np.nan, "slippage_pct": np.nan,
                 "overnight_ret": np.nan, "estado": "pend"}
         if confirmar:
-            r = AT.enviar_orden(t, qty, "sell", confirmar=True, tif=TIF_SALIDA, libro="overnight")
+            r = AT.enviar_orden(t, qty, "sell", confirmar=True, tif="opg", libro="overnight")
             fila["order_id"] = r.get("id", "")
             fila["estado"] = "enviada" if r.get("id") else "error"
-            print(f"  MKT SELL (apertura) {t} x{qty} -> {fila['estado']}")
+            print(f"  MOO SELL {t} x{qty} -> {fila['estado']}")
         else:
-            print(f"  [dry] MKT SELL (apertura) {t} x{qty}")
+            print(f"  [dry] MOO SELL {t} x{qty}")
         filas.append(fila)
     if confirmar and filas:
         _guardar(pd.concat([df, pd.DataFrame(filas)], ignore_index=True))
@@ -197,12 +171,10 @@ def reconciliar():
     df = _log()
     if not len(df):
         return
-    TERMINAL_SIN_FILL = {"expired", "canceled", "cancelled", "rejected", "done_for_day", "replaced"}
     for i, r in df.iterrows():
         if r.get("order_id") and (pd.isna(r.get("fill")) or r.get("fill") == ""):
             try:
-                o = AT.orden(str(r["order_id"]))
-                fav = o.get("filled_avg_price")
+                fav = AT.orden(str(r["order_id"])).get("filled_avg_price")
                 if fav:
                     fill = float(fav)
                     df.at[i, "fill"] = fill
@@ -210,10 +182,6 @@ def reconciliar():
                     if ref and ref > 0:
                         df.at[i, "slippage_pct"] = (fill - ref) / ref
                     df.at[i, "estado"] = "hecha"
-                elif str(o.get("status", "")).lower() in TERMINAL_SIN_FILL:
-                    # MOC/MOO en paper EXPIRAN sin llenar -> marcar 'expirada' para que NO cuente
-                    # como lote abierto (si no, bloquearia la re-entrada y falsearia la cartera).
-                    df.at[i, "estado"] = "expirada"
             except Exception:
                 continue
     # retorno overnight: para cada salida con fill, busca la última entrada con fill del mismo ticker

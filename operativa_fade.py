@@ -29,12 +29,6 @@ TP_PCT = 0.012           # objetivo de fade (cerca -> alto acierto)
 SL_PCT = 0.045           # stop lejos (raro, pero grande -> expectancy negativa)
 NOTIONAL = 2000.0        # $ por trade (más volumen; sigue siendo experimento Sharpe-negativo)
 MAX_POS = 6
-# Pre-filtro de SHORTABILIDAD (HIGIENE de ejecución, NO alfa). Research 2026-10-06
-# (docs/refinamiento_intradia_2026-10-06.md): no mejora la expectativa (sigue ~0), pero
-# evita malgastar intentos en low-floats HARD-TO-BORROW (ayer 6/11 fades rechazados HTB) y
-# reduce varianza ~5x. Umbrales: precio mínimo y volumen-dólar medio de 20 sesiones.
-PX_MIN = 5.0             # $ precio mínimo (sub-$5 suele ser HTB / no shortable)
-DVOL_MIN = 20e6          # $ volumen-dólar medio 20d mínimo (liquidez para shortear)
 CAMPOS = ["ts", "ticker", "gap", "lado", "qty", "entrada", "tp", "sl", "order_id",
           "fill", "slippage_pct", "estado"]
 
@@ -75,11 +69,7 @@ def _gap(ticker):
         px = AT.precio_actual([ticker]).get(ticker, op_hoy)
     except Exception:
         px = op_hoy
-    try:
-        dvol = float((d["close"] * d["volume"]).tail(20).median())
-    except Exception:
-        dvol = 0.0
-    return {"gap": op_hoy / cl_ayer - 1.0, "precio": float(px), "dvol": dvol}
+    return {"gap": op_hoy / cl_ayer - 1.0, "precio": float(px)}
 
 
 def gestionar(confirmar=False):
@@ -113,10 +103,6 @@ def gestionar(confirmar=False):
             continue
         px = g["precio"]
         if px <= 0:
-            continue
-        # HIGIENE shortabilidad (NO alfa): saltar sub-$5 e ilíquidos -> evita rechazos HTB
-        if px < PX_MIN or g.get("dvol", 0.0) < DVOL_MIN:
-            print(f"  [skip-shortable] {t} px {px:.2f} dvol ${g.get('dvol',0)/1e6:.0f}M")
             continue
         qty = int(NOTIONAL / px)
         if qty <= 0:
